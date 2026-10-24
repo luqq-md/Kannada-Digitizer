@@ -11,31 +11,33 @@ import ai_tools
 import exports
 import ocr_pipeline as ocr
 import storage
+import theme
 
-st.set_page_config(page_title="Kannada Digitizer", page_icon="📜", layout="wide")
+st.set_page_config(page_title="Kannada Digitizer · ಕನ್ನಡ ಡಿಜಿಟೈಸರ್", page_icon="📜", layout="wide")
 storage.init_db()
+theme.inject()
 
-st.markdown("""
-<style>
-mark {background:#ffe08a; padding:0 2px; border-radius:3px}
-.big {font-size:1.05rem; line-height:1.9}
-</style>""", unsafe_allow_html=True)
 
-st.sidebar.title("📜 Kannada Digitizer")
-st.sidebar.caption("ಕನ್ನಡ ಡಿಜಿಟೈಸರ್ · Free Karnataka's knowledge from paper.")
-page = st.sidebar.radio("Go to", ["Digitize", "Library & Search", "About"])
-st.sidebar.divider()
+
+# ------------------------------------------------------------------ sidebar
 import llm
-st.sidebar.write("AI helper:", f"✅ {llm.label()}" if llm.available() else "⚪ off (set GEMINI_API_KEY — free)")
+theme.sidebar_brand()
+page = st.sidebar.radio("Go to", ["Digitize", "Library & Search", "About"], label_visibility="collapsed")
+st.sidebar.divider()
+theme.sidebar_status(llm.label() if llm.available() else None)
+
 ss = st.session_state
+
 SAMPLE_DIR = Path(__file__).parent / "samples"
 SAMPLES = [("📄 Tilted notice", "notice_tilted.png"),
            ("📰 Noisy textbook page", "textbook_noisy.png"),
            ("📱 Phone-style photo (white on dark)", "hard_letter_a.png")]
 
+
+# ============================================================== DIGITIZE
 def digitize_page():
-    st.title("ಕನ್ನಡ ಪಠ್ಯ ಡಿಜಿಟೈಸ್ ಮಾಡಿ · Digitize Kannada text")
-    st.write("Upload a photo, scan or PDF. Get clean, editable, searchable Kannada text.")
+    theme.hero()
+    rail = st.container()
 
     files = st.file_uploader("Upload image or PDF", type=["png", "jpg", "jpeg", "webp", "pdf"],
                              accept_multiple_files=True)
@@ -44,12 +46,12 @@ def digitize_page():
 
     avail = [(l, f) for l, f in SAMPLES if (SAMPLE_DIR / f).exists()]
     if avail and not files:
-        st.caption("No file handy? Try a sample, then press Digitize:")
+        st.markdown('<p class="try-label">No file handy? Pick a sample, then press Digitize.</p>', unsafe_allow_html=True)
         for col, (label, fname) in zip(st.columns(len(avail)), avail):
             if col.button(label, key="s_" + fname):
                 ss.sample = fname
         if ss.get("sample"):
-            st.info(f"Sample selected: {ss.sample}. Press **Digitize**, or upload your own file.")
+            st.info(f"Sample chosen: {ss.sample}. Press Digitize, or upload your own file instead.")
 
     c1, c2, c3 = st.columns(3)
     use_pre = c1.checkbox("Clean image first (recommended)", True)
@@ -89,31 +91,31 @@ def digitize_page():
         ss.pop("facts", None)
         ss.saved_id = None
 
+    with rail:
+        theme.steps(3 if "results" in ss else 1)
+
     if "results" not in ss:
-        st.info("👆 Upload something to begin. Tip: a clear, well-lit photo works best.")
+        st.info("Upload a file or pick a sample to begin. A clear, well-lit photo works best.")
         return
 
     results, images = ss.results, ss.images
     avg = sum(r.avg_conf for r in results) / len(results)
     engines = ", ".join(sorted({r.engine for r in results}))
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Pages", len(images))
-    m2.metric("Average confidence", f"{avg:.0f}%")
-    m3.metric("Engine used", engines)
+    theme.result_header(avg, len(images), engines, results[0].variant)
 
     left, right = st.columns(2)
     with left:
-        st.subheader("Original")
+        theme.plate_title("Your photo")
         idx = st.number_input("Page", 1, len(images), 1) - 1 if len(images) > 1 else 0
         st.image(images[idx], width="stretch")
-        with st.expander("See what the computer read (auto-cleaned and cropped)", expanded=True):
+        with st.expander("See what the reader saw (cleaned and cropped)", expanded=False):
             st.caption(f"Method chosen automatically: {results[idx].variant}")
             st.image(results[idx].preprocessed, width="stretch")
     with right:
-        st.subheader("Extracted text (editable)")
+        theme.plate_title("Digital text. Edit anything that looks wrong.")
         ss.text = st.text_area("text", ss.text, height=420, label_visibility="collapsed")
         if results[idx].words:
-            with st.expander("Highlight uncertain words (yellow = please check)"):
+            with st.expander("Show uncertain words in yellow"):
                 st.markdown(f'<div class="big">{ocr.highlight_html(results[idx].words)}</div>',
                             unsafe_allow_html=True)
 
@@ -135,7 +137,7 @@ def digitize_page():
                    if tr else "Saved! (English translation unavailable right now, "
                               "so search works in Kannada only.)")
 
-    st.subheader("Download")
+    theme.plate_title("Take it with you")
     d1, d2, d3 = st.columns(3)
     d1.download_button("⬇ Text (.txt)", exports.to_txt(ss.text), f"{ss.title}.txt")
     d2.download_button("⬇ Word (.docx)", exports.to_docx(ss.title, ss.text), f"{ss.title}.docx")
@@ -150,7 +152,7 @@ def digitize_page():
 
 def understand_tools(text):
     st.divider()
-    st.subheader("Understand it")
+    theme.plate_title("Understand it")
     t1, t2, t3, t4, t5 = st.tabs(["🌐 English", "📝 Summary", "📌 Key facts", "🔊 Listen", "💬 Ask"])
     with t1:
         if st.button("Translate to English"):
@@ -204,9 +206,11 @@ def understand_tools(text):
         if ss.get("answer"):
             st.write(ss.answer)
 
+
+# ================================================================ LIBRARY
 def library_page():
-    st.title("Library & Search")
-    q = st.text_input("🔎 Search all documents (Kannada or English)", placeholder="ಉದಾ: ಪರೀಕ್ಷೆ")
+    theme.page_head("Library", "Everything you saved. Search in Kannada or English.")
+    q = st.text_input("Search your documents", placeholder="Try ಪರೀಕ್ಷೆ or exam")
     if q:
         hits = storage.search(q)
         st.caption(f"{len(hits)} result(s)")
@@ -217,7 +221,7 @@ def library_page():
     st.divider()
     docs = storage.list_documents()
     if not docs:
-        st.info("No documents yet. Digitize one and press **Save to library**.")
+        st.info("Nothing saved yet. Digitize a page and press Save to library. It will appear here, searchable in Kannada and English.")
     for d in docs:
         with st.expander(f"📄 {d['title']}  —  {d['pages']} page(s), {d['avg_conf']:.0f}% conf, {d['created'][:10]}"):
             full = storage.get_document(d["id"])
@@ -232,50 +236,49 @@ def library_page():
             if c2.button("Delete", key=f"x{d['id']}"):
                 storage.delete_document(d["id"])
                 st.rerun()
+
+
+# ================================================================== ABOUT
 def about_page():
-    st.title("About this project")
-    st.markdown("""
-**Problem:** Karnataka's knowledge is trapped on paper: notices, textbooks, newspapers,
-handwritten records. It cannot be searched, copied, translated or read aloud.
-
-**Solution:** Kannada Digitizer turns images, scans and PDFs into editable, searchable text,
-then helps people *understand* it: translate, summarize, find key facts, listen, ask questions.
-
-**Who it helps:** students, elders who struggle with small print, non-Kannada speakers,
-researchers and government offices digitizing records.
-""")
-    st.subheader("How it works")
+    theme.page_head("About this project", "Why it exists, how it works, and how well it works.")
+    theme.about_legend([
+        ("The problem", "Karnataka's knowledge sits on paper: notices, textbooks, newspapers and "
+                        "handwritten records. It cannot be searched, copied, translated or read aloud."),
+        ("What this does", "It turns photos, scans and PDFs into editable, searchable Kannada text, "
+                           "then helps you understand it: translate, summarize, find key facts, listen, ask."),
+        ("Who it helps", "Students, elders who struggle with small print, people learning Kannada, "
+                         "researchers, and offices digitizing records."),
+    ])
+    theme.plate_title("How it works")
     st.graphviz_chart("""
 digraph G {
-  rankdir=LR; bgcolor="transparent";
-  node [shape=box, style="rounded,filled", fillcolor="#fff3d6", fontname="Helvetica", color="#c98a00"];
-  edge [color="#888888", fontname="Helvetica", fontsize=10];
-  A [label="Photo / scan / PDF"];
-  B [label="Clean-up\n(flip colours, straighten,\nremove glare)"];
-  C [label="Tesseract\n(Kannada OCR)"];
-  D [label="Find the text area\ncrop + re-read"];
-  E [label="AI vision fallback\n(handwriting)", fillcolor="#e3f0ff", color="#3b7dd8"];
-  F [label="Editable text"];
-  G [label="Search · Export\nTranslate · Facts · Listen · Ask", fillcolor="#e6f6e6", color="#3a9a3a"];
+  rankdir=LR; bgcolor="transparent"; nodesep=0.35; ranksep=0.45;
+  node [shape=box, style="rounded,filled", fillcolor="#EFE7B8", fontname="Helvetica", fontsize=15, color="#BDB27A", margin="0.18,0.12"];
+  edge [color="#2B3A33", fontname="Helvetica", fontsize=12];
+  A [label="Photo, scan\nor PDF"];
+  B [label="Clean-up\nflip colours,\nstraighten,\nremove glare"];
+  C [label="Tesseract\nKannada reader"];
+  D [label="Find the text,\ncrop and\nread again"];
+  E [label="AI reader\nfor handwriting", fillcolor="#13201B", fontcolor="white", color="#13201B"];
+  F [label="Editable\ntext"];
+  G [label="Search, export,\ntranslate, key facts,\nlisten, ask", fillcolor="#E8A317", color="#B97F00"];
   A -> B -> C -> D -> F -> G;
-  C -> E [style=dashed, label="low confidence"];
+  C -> E [style=dashed, label=" low\n confidence"];
   E -> F [style=dashed];
 }
 """)
-    st.subheader("Measured accuracy")
-    st.markdown("""
-Character error rate on 15 test images (clean, tilted, noisy, and light-on-dark phone-style
-photos). **Lower is better.**
-
-| | Plain Tesseract | This pipeline |
-|---|---|---|
-| All 15 images (average) | 37.3% | **0.3%** |
-| 6 hard phone-style images | 70.2% | **0.3%** |
-
-**Be aware:** these test images are *synthetic* (computer-made text, then degraded), so real
-photos are harder. On two real, low-resolution phone-screen photos the pipeline recovered
-about 79% of the words, with small spelling slips. Handwriting needs the AI vision fallback.
-""")
+    theme.plate_title("Measured accuracy")
+    st.caption("Character error rate on 15 test images. Lower is better.")
+    theme.accuracy_bars([
+        ("All 15 images, average", [("Plain Tesseract", 37.3, False), ("This pipeline", 0.3, True)]),
+        ("The 6 hardest, phone-style photos (white text on dark, tilted, glare)",
+         [("Plain Tesseract", 70.2, False), ("This pipeline", 0.3, True)]),
+    ])
+    st.markdown(
+        "**Read this honestly.** The test images are synthetic: computer-made Kannada, then degraded "
+        "to look like phone photos. Real photos are harder. On two real, low-resolution phone-screen "
+        "photos the pipeline recovered about 79% of the words, with small spelling slips. "
+        "Handwriting depends on the AI reader.")
 
 
 {"Digitize": digitize_page, "Library & Search": library_page, "About": about_page}[page]()
