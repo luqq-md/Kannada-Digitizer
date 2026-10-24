@@ -97,6 +97,18 @@ def summarize(text: str) -> str:
                    + text)
 
 
+def key_facts(text: str) -> str:
+    if not ai_available():
+        return "Add a GEMINI_API_KEY (free) or ANTHROPIC_API_KEY to enable key facts."
+    return _claude(
+        "Read this Kannada document (extracted by OCR, so it may contain small mistakes). "
+        "List its key facts in English as short bullets, grouped under these headings and "
+        "skipping any heading with nothing to report: Who / Dates and deadlines / Places / "
+        "Amounts / What the reader must do. Write names in Kannada script followed by an "
+        "English spelling in brackets. Do not invent anything that is not in the document.\n\n"
+        + text)
+
+
 def ask(text: str, question: str) -> str:
     if not ai_available():
         return "Add a GEMINI_API_KEY (free) or ANTHROPIC_API_KEY to enable document Q&A."
