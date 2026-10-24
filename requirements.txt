@@ -1,0 +1,12 @@
+streamlit>=1.40
+pytesseract
+opencv-python-headless
+numpy
+pillow
+pdf2image
+pypdf
+python-docx
+gtts
+deep-translator
+anthropic
+google-genai
