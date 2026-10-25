@@ -7,6 +7,7 @@ Two states:  start (pick a page)  ->  workspace (read it, in English and Kannada
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import ai_tools
 import exports
@@ -19,16 +20,36 @@ st.set_page_config(page_title="Kannada Digitizer · ಕನ್ನಡ ಡಿಜಿ
 storage.init_db()
 theme.inject()
 
-# ------------------------------------------------------------------ sidebar
+# ------------------------------------------------------------------ navigation
+PAGES = ["Digitize", "Library & Search", "About"]
+ss = st.session_state
+if "page" not in ss:
+    ss.page = "Digitize"
+ss.setdefault("nav_side", ss.page)
+ss.setdefault("nav_top", ss.page)
+
+
+def _go(src):
+    """Keep the sidebar menu and the phone menu in step."""
+    if ss.get(src):                       # a segmented control can be un-selected: ignore that
+        ss.page = ss[src]
+    ss.nav_side = ss.page
+    ss.nav_top = ss.page
+
+
 theme.sidebar_brand()
-page = st.sidebar.radio("Go to", ["Digitize", "Library & Search", "About"],
-                        label_visibility="collapsed")
+st.sidebar.radio("Go to", PAGES, key="nav_side", on_change=_go, args=("nav_side",),
+                 label_visibility="collapsed")
 st.sidebar.divider()
 theme.sidebar_status(llm.label() if llm.available() else None)
-
-ss = st.session_state
+if hasattr(st, "segmented_control"):
+    with st.container(key="mobilenav"):          # shown only on narrow screens (see theme.py)
+        st.segmented_control("Menu", PAGES, key="nav_top", on_change=_go, args=("nav_top",),
+                             label_visibility="collapsed")
+page = ss.page
 
 SAMPLE_DIR = Path(__file__).parent / "samples"
+SOURCES = ["Upload a file", "Take a photo"]
 SAMPLES = [("Tilted notice", "notice_tilted.png"),
            ("Noisy textbook page", "textbook_noisy.png"),
            ("Phone-style photo, white on dark", "hard_letter_a.png")]
@@ -50,6 +71,31 @@ def run_ai(fn, *args, spinner="Thinking…"):
     return None
 
 
+def safe_understand(text: str) -> dict:
+    """Translation must never stop a page from being read: any failure becomes 'no English'."""
+    try:
+        return ai_tools.understand(text)
+    except Exception:
+        return {"lines": [], "english": "", "corrected": None, "source": "none"}
+
+
+def is_phone() -> bool:
+    try:
+        ua = st.context.headers.get("User-Agent", "")
+    except Exception:
+        return False
+    return any(k in ua for k in ("Mobi", "Android", "iPhone", "iPad"))
+
+
+def rear_camera_hint():
+    """Ask the phone to open its BACK camera (sharp, full resolution) from the file picker."""
+    components.html("""<script>
+      const fix=()=>{try{window.parent.document.querySelectorAll('input[type=file]').forEach(i=>{
+        i.setAttribute('capture','environment');i.setAttribute('accept','image/*');});}catch(e){}};
+      fix();let n=0;const t=setInterval(()=>{fix();if(++n>25)clearInterval(t);},300);
+    </script>""", height=0)
+
+
 def understanding():
     """The English/line-by-line result for the current text, or None if there is none."""
     u = ss.get("und")
@@ -62,7 +108,7 @@ def translation_is_stale() -> bool:
 
 def refresh_understanding():
     with st.spinner("Translating so it reads in English…"):
-        ss.und = ai_tools.understand(ss.text)
+        ss.und = safe_understand(ss.text)
         ss.und_text = ss.text
 
 
@@ -75,6 +121,7 @@ def best_text() -> str:
 def reset_work():
     for k in WORK_KEYS:
         ss.pop(k, None)
+    ss.nonce = ss.get("nonce", 0) + 1          # fresh, empty upload and camera widgets
 
 
 # ================================================================== START
@@ -83,14 +130,35 @@ def start_page():
     theme.steps(1)
 
     theme.plate_title("Add your page")
-    files = st.file_uploader("Drop a photo, scan or PDF here, or browse",
-                             type=["png", "jpg", "jpeg", "webp", "pdf"],
-                             accept_multiple_files=True)
-    use_cam = st.toggle("Use the camera instead")
-    cam = st.camera_input("Camera", label_visibility="collapsed") if use_cam else None
+    if "source" not in ss:
+        ss.source = SOURCES[1] if is_phone() else SOURCES[0]       # phones start with the camera
+    seg = getattr(st, "segmented_control", None)
+    if seg:
+        source = seg("How do you want to add it?", SOURCES, key="source", label_visibility="collapsed")
+    else:
+        source = st.radio("How do you want to add it?", SOURCES, key="source", horizontal=True,
+                          label_visibility="collapsed")
+    source = source or ss.get("last_source") or SOURCES[0]
+    ss.last_source = source
+    n = ss.get("nonce", 0)
+
+    files, photo = [], None
+    if source == SOURCES[0]:
+        files = st.file_uploader("Drop a photo, scan or PDF here, or browse",
+                                 type=["png", "jpg", "jpeg", "webp", "pdf"],
+                                 accept_multiple_files=True, key=f"up{n}")
+    elif is_phone():
+        with st.container(key="camwrap"):
+            photo = st.file_uploader("Tap below to open your camera and photograph the page",
+                                     type=["png", "jpg", "jpeg", "webp"], key=f"cam{n}")
+        rear_camera_hint()
+        st.caption("This uses your phone's own camera, so the photo is sharp. "
+                   "Fill the frame with the page and hold steady. It reads automatically.")
+    else:
+        photo = st.camera_input("Take a photo of the page", key=f"webcam{n}")
 
     avail = [(l, f) for l, f in SAMPLES if (SAMPLE_DIR / f).exists()]
-    if avail and not files and not cam:
+    if avail and not files and photo is None:
         st.markdown('<p class="try-label">No file handy? Try a sample.</p>', unsafe_allow_html=True)
         for col, (label, fname) in zip(st.columns(len(avail)), avail):
             with col:
@@ -110,11 +178,18 @@ def start_page():
     force_v = c3.checkbox("Handwriting mode (AI reader always)", False, disabled=not ai_on,
                           help="" if ai_on else NEEDS_KEY)
 
-    ready = bool(files or cam or ss.get("sample"))
-    if not st.button("Digitize this page", type="primary", disabled=not ready):
+    ready = bool(files or photo is not None or ss.get("sample"))
+    photo_id = None
+    if photo is not None:
+        photo_id = getattr(photo, "file_id", None) or (photo.name, photo.size)
+    auto = photo is not None and ss.get("auto_done") != photo_id    # a fresh photo is read at once
+    pressed = st.button("Digitize this page", type="primary", disabled=not ready)
+    if not (pressed or auto):
         if not ready:
-            st.info("Choose a file or a sample, then press Digitize. A clear, well-lit photo works best.")
+            st.info("Choose a file, take a photo, or pick a sample. A clear, well-lit photo works best.")
         return
+    if auto:
+        ss.auto_done = photo_id
 
     # ---- read the page(s)
     images, names = [], []
@@ -123,8 +198,8 @@ def start_page():
             for im in ocr.load_pages(f.getvalue(), f.name):
                 images.append(im)
                 names.append(f.name)
-        if cam:
-            images.append(ocr.load_pages(cam.getvalue(), "camera.jpg")[0])
+        if photo is not None:
+            images.extend(ocr.load_pages(photo.getvalue(), photo.name or "camera.jpg"))
             names.append("camera photo")
         if not images and ss.get("sample"):
             sp = SAMPLE_DIR / ss.sample
@@ -139,10 +214,16 @@ def start_page():
         for i, im in enumerate(images):
             if len(images) > 1:
                 st.write(f"**Page {i + 1} of {len(images)}**")
-            results.append(ocr.process_page(im, use_pre, allow_v, force_v, on_step=st.write))
+            try:
+                results.append(ocr.process_page(im, use_pre, allow_v, force_v, on_step=st.write))
+            except Exception:
+                status.update(label="Could not read this page", state="error")
+                st.error("This page could not be read. Try a clearer, well-lit photo "
+                         "with the page filling the frame.")
+                return
         text = "\n\n".join(r.text for r in results)
         st.write("Translating so it reads in English")
-        und = ai_tools.understand(text)
+        und = safe_understand(text)
         status.update(label="Ready", state="complete", expanded=False)
 
     reset_work()

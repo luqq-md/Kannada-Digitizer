@@ -1,0 +1,70 @@
+"""End-to-end checks that drive the real Streamlit app. No internet or key needed."""
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+pytest.importorskip("streamlit.testing.v1")
+from streamlit.testing.v1 import AppTest   # noqa: E402
+
+import ai_tools   # noqa: E402
+
+pytestmark = pytest.mark.skipif(shutil.which("tesseract") is None, reason="Tesseract not installed")
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(ai_tools, "translate_free", lambda t, target="en": "FREE english")
+    monkeypatch.setattr(ai_tools, "_free_per_line", lambda lines: ["x"] * len(lines))
+    ai_tools._CACHE.clear()
+
+
+def new_app():
+    return AppTest.from_file(str(ROOT / "app.py"), default_timeout=180).run()
+
+
+def read_sample(at):
+    [b for b in at.button if b.key == "s_notice_tilted.png"][0].click(); at.run()
+    [b for b in at.button if "Digitize" in b.label][0].click(); at.run()
+
+
+def in_workspace(at):
+    return any(b.label == "Save" for b in at.button)
+
+
+def test_sample_page_reaches_the_workspace():
+    at = new_app(); read_sample(at)
+    assert not at.exception and in_workspace(at)
+    assert any("FREE english" in m.value for m in at.markdown)       # English shown without a click
+
+
+def test_a_translation_crash_never_blocks_reading(monkeypatch):
+    def boom(text): raise AttributeError("no attribute 'understand'")   # e.g. a stale file on the server
+    monkeypatch.setattr(ai_tools, "understand", boom)
+    at = new_app(); read_sample(at)
+    assert not at.exception and in_workspace(at)
+
+
+def test_camera_is_an_equal_choice():
+    at = new_app()
+    assert at.session_state["source"] == "Upload a file"
+    at.session_state["source"] = "Take a photo"; at.run()
+    assert not at.exception and len(at.get("camera_input")) == 1
+
+
+def test_menu_pages_open_without_errors():
+    at = new_app()
+    for page in ("Library & Search", "About"):
+        at.sidebar.radio[0].set_value(page).run()
+        assert not at.exception and at.session_state["page"] == page
+
+
+def test_new_page_returns_to_the_start():
+    at = new_app(); read_sample(at)
+    [b for b in at.button if b.label == "New page"][0].click(); at.run()
+    assert not at.exception and any("Digitize" in b.label for b in at.button)

@@ -199,7 +199,19 @@ hr{border-color:var(--soap2);}
 .stApp [data-testid="stMain"] [data-testid="stTooltipIcon"] svg{color:var(--silver);}
 
 /* toolbar: hide Streamlit's Deploy / menu chrome so it looks like a product */
-[data-testid="stToolbar"],[data-testid="stDecoration"],[data-testid="stStatusWidget"]{display:none!important;}
+[data-testid="stToolbarActions"],[data-testid="stMainMenu"],[data-testid="stAppDeployButton"],
+[data-testid="stDecoration"],[data-testid="stStatusWidget"]{display:none!important;}
+/* NOTE: the toolbar itself must stay: it holds the button that re-opens the sidebar. */
+@media (min-width:992px){[data-testid="stSidebarCollapseButton"]{display:none!important;}}   /* keep the menu always visible on wide screens */
+.st-key-mobilenav{display:none;}
+@media (max-width:991px){.st-key-mobilenav{display:block;margin:.9rem 0 1.2rem;}}
+/* camera mode: the picker is really a camera button, so say so and drop the drag-and-drop hint */
+.st-key-camwrap [data-testid="stFileUploaderDropzone"]{justify-content:center;text-align:center;}
+.st-key-camwrap [data-testid="stFileUploaderDropzoneInstructions"]{display:none!important;}
+.st-key-camwrap [data-testid="stFileUploaderDropzone"] button,
+.st-key-camwrap [data-testid="stFileUploaderDropzone"] button *{font-size:0!important;}
+.st-key-camwrap [data-testid="stFileUploaderDropzone"] button::after{content:"Open camera";font-size:1.05rem;
+  font-weight:700;color:var(--ink);}
 
 /* ---- upload: a large, obvious drop slot with a gold call-to-action ---- */
 .stApp [data-testid="stFileUploaderDropzone"]{background:#F6F5EA;border:2px dashed var(--leaf2);
