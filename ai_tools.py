@@ -3,8 +3,11 @@
 Translation and read-aloud work WITHOUT any API key (free Google services).
 Summary, Q&A and meaning-aware translation need an AI key (free Gemini or Claude).
 """
+import hashlib
 import io
+import json
 import os
+import re
 import textwrap
 
 import llm
@@ -87,6 +90,98 @@ def translate_free(text: str, target="en") -> str:
     except Exception as e:
         errors.append(f"MyMemory: {e}")
     return "Translation failed. " + " | ".join(errors)
+
+
+# ---------------------------------------------------------------- understand
+# One AI call that gives a non-Kannada reader everything at once.
+UNDERSTAND_PROMPT = """You are helping a reader who may not know Kannada. The Kannada text below was read
+from a photo by OCR, so it can contain mistakes: wrong or missing letters, broken words, stray symbols.
+
+Using the context, produce JSON with exactly these keys:
+  "corrected": the Kannada lines with obvious OCR mistakes fixed. SAME number of lines, same order.
+  "pairs":     for each corrected line, a short natural English rendering of that line's meaning.
+               SAME number of items, same order. Read together they must flow like normal English.
+  "english":   the whole text as fluent, natural English, the way a person would say it (paragraphs ok).
+
+Reply with ONLY the JSON object, no explanations, no code fences. Both arrays must have exactly {n} items.
+
+LINES:
+{lines}"""
+
+_CACHE: dict = {}
+
+
+def _lines_of(text: str) -> list:
+    return [l.strip() for l in text.splitlines() if l.strip()]
+
+
+def _parse_understanding(raw: str, n: int):
+    """Pull the JSON out of the AI reply and check it. Returns a dict or None."""
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not m:
+        return None
+    try:
+        d = json.loads(m.group(0))
+        corrected, pairs, english = d["corrected"], d["pairs"], d["english"]
+    except Exception:
+        return None
+    if not (isinstance(corrected, list) and isinstance(pairs, list) and isinstance(english, str)):
+        return None
+    if len(corrected) != n or len(pairs) != n:
+        return None
+    return {"corrected": [str(x) for x in corrected], "pairs": [str(x) for x in pairs],
+            "english": english.strip()}
+
+
+def understand(text: str) -> dict:
+    """Everything an English reader needs, from the Kannada text.
+
+    Returns {"lines": [(kannada, english), ...], "english": str, "corrected": [str] | None,
+             "source": "ai" | "free" | "none"}. Never raises; results are cached by text.
+    """
+    lines = _lines_of(text)
+    empty = {"lines": [], "english": "", "corrected": None, "source": "none"}
+    if not lines:
+        return empty
+    key = hashlib.sha1(text.encode("utf-8")).hexdigest()
+    if key in _CACHE:
+        return _CACHE[key]
+
+    result = None
+    if ai_available():
+        prompt = UNDERSTAND_PROMPT.format(
+            n=len(lines), lines="\n".join(f"{i}. {l}" for i, l in enumerate(lines, 1)))
+        try:
+            d = _parse_understanding(_claude(prompt, 4000), len(lines))
+            if d:
+                result = {"lines": list(zip(d["corrected"], d["pairs"])), "english": d["english"],
+                          "corrected": d["corrected"], "source": "ai"}
+        except Exception:
+            result = None
+
+    if result is None:                      # free, word-by-word fallback
+        english = translate_free(text)
+        if not translation_ok(english):
+            return {**empty, "source": "none"}      # not cached: try again next time
+        per_line = _free_per_line(lines)
+        result = {"lines": list(zip(lines, per_line)), "english": english,
+                  "corrected": None, "source": "free"}
+
+    if len(_CACHE) > 64:
+        _CACHE.clear()
+    _CACHE[key] = result
+    return result
+
+
+def _free_per_line(lines: list) -> list:
+    try:
+        from deep_translator import GoogleTranslator
+        out = GoogleTranslator(source="kn", target="en").translate_batch(lines)
+        if out and len(out) == len(lines):
+            return [o or "" for o in out]
+    except Exception:
+        pass
+    return [""] * len(lines)
 
 
 def translation_ok(t: str) -> bool:

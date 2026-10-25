@@ -265,6 +265,59 @@ hr{border-color:var(--soap2);}
 .stApp .chip.vision{background:var(--ink);color:#fff;}
 .stApp .chip.vision *{color:#fff;}
 
+/* ================= workspace: compact bar, view switch, text plates ================= */
+.stApp .bar-compact{display:flex;align-items:center;gap:1rem;}
+.stApp .bar-compact .ring{width:62px;height:62px;}
+.stApp .bar-compact .ring svg{width:62px;height:62px;}
+.stApp .bar-compact .ring-num{font-size:1.02rem;}
+.stApp .bar-compact .verdict{font:800 1.25rem/1.1 var(--display);margin:0 0 .3rem;}
+.stApp .bar-compact .chips{gap:.35rem;}
+.stApp .bar-compact .chip{font-size:.78rem;padding:.12rem .55rem;}
+
+.leafplate{position:relative;border-radius:10px;border:1px solid var(--leaf2);padding:1.3rem 1.5rem 1.3rem 3.4rem;
+  background:
+   radial-gradient(circle at 1.5rem 12%,var(--soap) 0 .52rem,rgba(0,0,0,.32) .58rem,transparent .66rem),
+   radial-gradient(circle at 1.5rem 88%,var(--soap) 0 .52rem,rgba(0,0,0,.32) .58rem,transparent .66rem),
+   repeating-linear-gradient(to bottom,rgba(110,90,30,.08) 0 1px,transparent 1px 7px),
+   linear-gradient(180deg,#DDD5A3,var(--leaf));
+  box-shadow:0 18px 30px -22px rgba(19,32,27,.55);color:var(--leafink);}
+.stApp .leafplate p{color:var(--leafink);font:500 1.12rem/1.85 var(--body);margin:0 0 .8rem;}
+.stApp .leafplate p:last-child{margin-bottom:0;}
+.stApp .leafplate.kn p{font:500 1.3rem/2.05 var(--manu);}
+.leafnote{font-size:.85rem;color:var(--ink2);margin:.55rem 0 0;}
+
+.pairs{border:1px solid var(--leaf2);border-radius:10px;overflow:hidden;box-shadow:0 18px 30px -22px rgba(19,32,27,.55);}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid rgba(110,90,30,.22);}
+.pair:first-child{border-top:0;}
+.pair > div{padding:.8rem 1.1rem;}
+.stApp .pair .kn{font:600 1.18rem/1.7 var(--manu);color:var(--leafink);background:linear-gradient(180deg,#DDD5A3,var(--leaf));}
+.stApp .pair .en{font:500 1.02rem/1.65 var(--body);color:var(--ink);background:#F6F5EA;}
+.pairhead{display:grid;grid-template-columns:1fr 1fr;background:var(--ink);}
+.stApp .pairhead div{padding:.5rem 1.1rem;font:700 .85rem var(--body);color:#fff;}
+@media (max-width:700px){.pair{grid-template-columns:1fr;}.pairhead{display:none;}}
+
+/* view switch (Streamlit builds it as a button group) */
+.stApp [data-testid="stButtonGroup"] button{background:#fff!important;border:1.5px solid var(--silver)!important;
+  color:var(--ink)!important;font-weight:600;border-radius:6px!important;min-height:2.5rem;padding:.3rem 1.1rem;}
+.stApp [data-testid="stButtonGroup"] button *{color:var(--ink)!important;}
+.stApp [data-testid="stButtonGroup"] button:hover{border-color:var(--ink)!important;}
+.stApp [data-testid="stButtonGroup"] button[aria-checked="true"],
+.stApp [data-testid="stButtonGroup"] button[aria-pressed="true"]{background:var(--ink)!important;border-color:var(--ink)!important;}
+.stApp [data-testid="stButtonGroup"] button[aria-checked="true"] *,
+.stApp [data-testid="stButtonGroup"] button[aria-pressed="true"] *{color:#fff!important;}
+
+/* popover (Download menu) renders in a portal outside .stApp, so it is styled directly */
+[data-testid="stPopover"] > button,[data-testid="stPopoverButton"]{background:transparent!important;border:1.5px solid var(--ink)!important;
+  border-radius:5px!important;color:var(--ink)!important;font-weight:600;min-height:2.7rem;}
+[data-testid="stPopover"] > button *,[data-testid="stPopoverButton"] *{color:var(--ink)!important;}
+[data-testid="stPopoverBody"]{background:#fff!important;border:1px solid var(--soap2);border-radius:8px;}
+[data-testid="stPopoverBody"] p,[data-testid="stPopoverBody"] span,[data-testid="stPopoverBody"] label{color:var(--ink)!important;}
+[data-testid="stPopoverBody"] button{background:#fff!important;border:1.5px solid var(--ink)!important;border-radius:5px!important;
+  color:var(--ink)!important;font-weight:600;}
+[data-testid="stPopoverBody"] button *{color:var(--ink)!important;}
+[data-testid="stPopoverBody"] button:hover{background:var(--ink)!important;}
+[data-testid="stPopoverBody"] button:hover *{color:#fff!important;}
+
 """
 
 
@@ -361,6 +414,50 @@ def accuracy_bars(groups) -> None:
                        f'<div class="bar {"good" if ours else ""}"><i style="width:{w}%"></i></div>'
                        f'<b>{pct:g}%</b></div>')
     st.markdown('<div class="bars">' + "".join(out) + "</div>", unsafe_allow_html=True)
+
+
+def result_bar(avg: float, pages: int, engines: str, variant: str) -> None:
+    """Compact confidence summary for the top bar of the workspace."""
+    pct = max(0, min(100, round(avg)))
+    if pct >= 90:
+        verdict, color = "Clean read", "#13201B"
+    elif pct >= 70:
+        verdict, color = "Good read", "#E8A317"
+    else:
+        verdict, color = "Rough read", "#A31F1A"
+    c = 2 * 3.14159 * 44
+    ring = (f'<div class="ring"><svg width="62" height="62" viewBox="0 0 104 104">'
+            f'<circle cx="52" cy="52" r="44" fill="none" stroke="#D8DED4" stroke-width="10"/>'
+            f'<circle cx="52" cy="52" r="44" fill="none" stroke="{color}" stroke-width="10" '
+            f'stroke-linecap="round" stroke-dasharray="{c * pct / 100:.1f} {c:.1f}"/></svg>'
+            f'<div class="ring-num">{pct}%</div></div>')
+    vision = engines.lower().startswith("vision") or variant == "vision"
+    chips = (f'<span class="chip">{pages} page{"s" if pages != 1 else ""}</span>'
+             f'<span class="chip {"vision" if vision else ""}">{"AI vision" if vision else "Tesseract"}</span>')
+    hint = {"Clean read": "Looks solid", "Good read": "Check the yellow words",
+            "Rough read": "Please review every line"}[verdict]
+    st.markdown(f'<div class="bar-compact">{ring}<div><p class="verdict">{verdict}</p>'
+                f'<div class="chips"><span class="chip">{hint}</span>{chips}</div></div></div>',
+                unsafe_allow_html=True)
+
+
+def english_plate(text: str, note: str = "") -> None:
+    """The English meaning on a palm-leaf plate, one paragraph per line break."""
+    paras = "".join(f"<p>{html.escape(p)}</p>" for p in text.split("\n") if p.strip())
+    extra = f'<p class="leafnote">{html.escape(note)}</p>' if note else ""
+    st.markdown(f'<div class="leafplate">{paras}</div>{extra}', unsafe_allow_html=True)
+
+
+def kannada_plate(inner_html: str) -> None:
+    st.markdown(f'<div class="leafplate kn">{inner_html}</div>', unsafe_allow_html=True)
+
+
+def pairs_view(pairs) -> None:
+    """Each Kannada line with its English meaning beside it."""
+    rows = "".join(f'<div class="pair"><div class="kn">{html.escape(k)}</div>'
+                   f'<div class="en">{html.escape(e)}</div></div>' for k, e in pairs)
+    st.markdown('<div class="pairs"><div class="pairhead"><div>Kannada</div><div>English</div></div>'
+                + rows + "</div>", unsafe_allow_html=True)
 
 
 def page_head(title: str, sub: str) -> None:

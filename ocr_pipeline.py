@@ -14,7 +14,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytesseract
-from PIL import Image
+from concurrent.futures import ThreadPoolExecutor
+
+from PIL import Image, ImageOps
 
 # Use the Kannada model that ships inside this project folder
 TESSDATA_DIR = str(Path(__file__).parent / "tessdata")
@@ -40,12 +42,38 @@ class PageResult:
 
 
 # ---------------------------------------------------------------- loading
+MAX_FILE_MB = 25        # reject huge uploads early (free hosting has limited memory)
+MAX_PDF_PAGES = 12
+MAX_WORKERS = 3         # image versions are read in parallel
+
+# Tesseract uses several threads itself; with our own parallelism that would oversubscribe the CPU.
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+
+
+class UnreadableFile(ValueError):
+    """The upload cannot be used. str(e) is a plain-language reason for the visitor."""
+
+
 def load_pages(data: bytes, filename: str) -> list:
-    """Return a list of PIL images (one per page)."""
-    if filename.lower().endswith(".pdf"):
-        from pdf2image import convert_from_bytes
-        return convert_from_bytes(data, dpi=250)
-    return [Image.open(io.BytesIO(data)).convert("RGB")]
+    """Return a list of PIL images (one per page), upright, or raise UnreadableFile."""
+    if len(data) > MAX_FILE_MB * 1024 * 1024:
+        raise UnreadableFile(f"That file is larger than {MAX_FILE_MB} MB. "
+                             "Please use a smaller photo or scan.")
+    try:
+        if filename.lower().endswith(".pdf"):
+            from pdf2image import convert_from_bytes, pdfinfo_from_bytes
+            n = int(pdfinfo_from_bytes(data).get("Pages", 1))
+            if n > MAX_PDF_PAGES:
+                raise UnreadableFile(f"This PDF has {n} pages. Please upload up to "
+                                     f"{MAX_PDF_PAGES} pages at a time.")
+            return convert_from_bytes(data, dpi=220)
+        img = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))   # phone photos carry a rotation tag
+        return [img.convert("RGB")]
+    except UnreadableFile:
+        raise
+    except Exception as e:
+        raise UnreadableFile("This file could not be opened. Please use a PNG, JPG, WEBP "
+                             "or PDF that is not damaged or password-protected.") from e
 
 
 # ---------------------------------------------------------- preprocessing
@@ -155,8 +183,8 @@ def _adaptive(gray: np.ndarray, invert: bool, skew_fn) -> Image.Image:
     return Image.fromarray(b)
 
 
-def candidate_images(img: Image.Image):
-    """Yield (name, image) versions to try, most likely best first."""
+def candidate_makers(img: Image.Image):
+    """List of (name, make_image) to try, most likely best first. Nothing runs until called."""
     gray = _gray(img)
     dark = float(np.median(gray)) < 120          # dark background -> light text
     std = ("standard", lambda: _standard(gray))
@@ -169,7 +197,12 @@ def candidate_images(img: Image.Image):
                  ("photo-lines", lambda: _adaptive(gray, False, _skew_blob)),
                  ("photo-projection", lambda: _adaptive(gray, False, _skew_projection))]
     order.append(("original", lambda: img.convert("RGB")))
-    for name, make in order:
+    return order
+
+
+def candidate_images(img: Image.Image):
+    """Yield (name, image) versions to try, most likely best first."""
+    for name, make in candidate_makers(img):
         yield name, make()
 
 
@@ -303,6 +336,22 @@ def clean_text(text: str) -> str:
 CROP_BELOW = 88   # pages already read this well don't need the crop-and-reread pass
 
 
+def _read_variant(name: str, make) -> "PageResult":
+    cand = make()
+    r = run_tesseract(cand)
+    r.preprocessed, r.variant = cand, name
+    return r
+
+
+def _reread_cropped(r: "PageResult"):
+    crop = locate_text_crop(r.preprocessed, r.boxes)
+    if crop is None:
+        return None
+    r2 = run_tesseract(crop)
+    r2.preprocessed, r2.variant = crop, r.variant + "+crop"
+    return r2
+
+
 def process_page(img: Image.Image, use_preprocess: bool = True,
                  allow_vision: bool = True, force_vision: bool = False,
                  on_step=None) -> PageResult:
@@ -318,29 +367,24 @@ def process_page(img: Image.Image, use_preprocess: bool = True,
         res = run_tesseract(img)
         res.preprocessed, res.variant = img, "original"
     else:
-        # Pass 1: try several cleaned-up versions of the whole image
-        tried = []
-        step("Cleaning up the image")
-        for name, cand in candidate_images(img):
-            step(f"Reading Kannada text (cleanup: {name})")
-            r = run_tesseract(cand)
-            r.preprocessed, r.variant = cand, name
-            tried.append(r)
-            if r.avg_conf >= EARLY_STOP_CONF:        # clean page: no need to try more
-                break
+        # Pass 1: read the page; if the first cleanup is not clearly good, try the others in parallel
+        makers = candidate_makers(img)
+        step("Cleaning up the image and reading the Kannada text")
+        tried = [_read_variant(*makers[0])]
+        if tried[0].avg_conf < EARLY_STOP_CONF and len(makers) > 1:
+            step("Trying other cleanups side by side")
+            with ThreadPoolExecutor(MAX_WORKERS) as pool:
+                tried += list(pool.map(lambda m: _read_variant(*m), makers[1:]))
         res = max(tried, key=lambda r: r.score)
 
         # Pass 2 (hard photos): crop to where the text is, throw the rest away, re-read
         if res.avg_conf < CROP_BELOW:
             step("Hard page: finding the text area and reading it again")
-            for r in sorted(tried, key=lambda r: r.score, reverse=True)[:3]:
-                crop = locate_text_crop(r.preprocessed, r.boxes)
-                if crop is None:
-                    continue
-                r2 = run_tesseract(crop)
-                r2.preprocessed, r2.variant = crop, r.variant + "+crop"
-                if r2.score > res.score:
-                    res = r2
+            top = sorted(tried, key=lambda r: r.score, reverse=True)[:3]
+            with ThreadPoolExecutor(MAX_WORKERS) as pool:
+                for r2 in pool.map(_reread_cropped, top):
+                    if r2 is not None and r2.score > res.score:
+                        res = r2
 
     if allow_vision and vision_available() and res.avg_conf < FALLBACK_BELOW:
         try:

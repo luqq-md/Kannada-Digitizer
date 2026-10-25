@@ -5,13 +5,16 @@ then translate it, summarize it, listen to it, and ask questions about it.
 Built for the Kannada Digital Innovation Hackathon 2026 (Problem 5: Kannada Text Digitization).
 
 ## Features
-- Upload images / scanned PDFs / camera photos
-- OpenCV cleanup: upscale, denoise, deskew, binarize
-- Kannada OCR with Tesseract; automatic **vision-model fallback** for handwriting and low-confidence pages
-- Side-by-side original vs. editable text, low-confidence words highlighted
-- Document library with Kannada **full-text search**
-- Export: TXT, DOCX, searchable PDF
-- Understand: English translation, summary, read-aloud (Kannada), document Q&A
+- Upload images, scanned PDFs or camera photos (phone rotation is fixed automatically)
+- OpenCV clean-up: upscale, denoise, straighten, flip white-on-dark text, remove glare
+- Kannada OCR with Tesseract; several clean-ups are tried **in parallel** and the best is kept
+- Hard photos: the app finds where the text is, crops away the rest and reads it again
+- **English right beside the Kannada**, translated automatically: *English*, *Side by side*
+  (each Kannada line with its meaning) and *Kannada* (editable) views
+- AI helper (free Gemini or Claude): fixes reading mistakes, translates by meaning, summary,
+  key facts, ask questions, handwriting fallback. Works without a key in a basic mode
+- Library with Kannada and English full-text search
+- Export: Word (English + Kannada + line-by-line table), TXT, searchable PDF; listen in Kannada or English
 
 ## Quick start
 1. Install **Python 3.10+**, **Tesseract OCR**, and **Poppler** (for PDFs).
@@ -71,3 +74,12 @@ Replace/add your own real scans in `samples/` with a matching `.txt` holding the
 
 Notes: free apps sleep when idle (open the link before a demo), saved library documents are
 not permanent on free hosting, and Tesseract on the cloud may be an older version than on your PC.
+
+## Tests
+```
+pip install pytest
+pytest
+```
+19 automated checks cover search and the database upgrade, AI reply parsing and every fallback,
+model fallback and key masking, safe file loading, reading the sample pages, and the Word export.
+They need no internet and no API key.

@@ -1,6 +1,8 @@
 """ಕನ್ನಡ ಡಿಜಿಟೈಸರ್ - Kannada Digitizer (Streamlit app).
 
 Run:  streamlit run app.py
+
+Two states:  start (pick a page)  ->  workspace (read it, in English and Kannada).
 """
 from pathlib import Path
 
@@ -30,8 +32,10 @@ SAMPLE_DIR = Path(__file__).parent / "samples"
 SAMPLES = [("Tilted notice", "notice_tilted.png"),
            ("Noisy textbook page", "textbook_noisy.png"),
            ("Phone-style photo, white on dark", "hard_letter_a.png")]
-
+VIEWS = ["English", "Side by side", "Kannada"]
 NEEDS_KEY = "Add a free GEMINI_API_KEY in the app's Secrets to turn this on."
+WORK_KEYS = ("images", "results", "title", "text", "und", "und_text", "summary", "facts",
+             "answer", "audio", "pdf", "saved_id")
 
 
 def run_ai(fn, *args, spinner="Thinking…"):
@@ -46,10 +50,37 @@ def run_ai(fn, *args, spinner="Thinking…"):
     return None
 
 
-# ============================================================== DIGITIZE
-def digitize_page():
+def understanding():
+    """The English/line-by-line result for the current text, or None if there is none."""
+    u = ss.get("und")
+    return u if u and u.get("source") != "none" else None
+
+
+def translation_is_stale() -> bool:
+    return bool(understanding()) and ss.get("und_text") != ss.get("text")
+
+
+def refresh_understanding():
+    with st.spinner("Translating so it reads in English…"):
+        ss.und = ai_tools.understand(ss.text)
+        ss.und_text = ss.text
+
+
+def best_text() -> str:
+    """The AI-corrected Kannada if we have it (fewer reading mistakes), else what was read."""
+    u = understanding()
+    return "\n".join(u["corrected"]) if u and u.get("corrected") else ss.text
+
+
+def reset_work():
+    for k in WORK_KEYS:
+        ss.pop(k, None)
+
+
+# ================================================================== START
+def start_page():
     theme.hero()
-    rail = st.container()
+    theme.steps(1)
 
     theme.plate_title("Add your page")
     files = st.file_uploader("Drop a photo, scan or PDF here, or browse",
@@ -80,8 +111,14 @@ def digitize_page():
                           help="" if ai_on else NEEDS_KEY)
 
     ready = bool(files or cam or ss.get("sample"))
-    if st.button("Digitize this page", type="primary", disabled=not ready):
-        images, names = [], []
+    if not st.button("Digitize this page", type="primary", disabled=not ready):
+        if not ready:
+            st.info("Choose a file or a sample, then press Digitize. A clear, well-lit photo works best.")
+        return
+
+    # ---- read the page(s)
+    images, names = [], []
+    try:
         for f in (files or []):
             for im in ocr.load_pages(f.getvalue(), f.name):
                 images.append(im)
@@ -93,170 +130,196 @@ def digitize_page():
             sp = SAMPLE_DIR / ss.sample
             images.extend(ocr.load_pages(sp.read_bytes(), sp.name))
             names.append(sp.name)
-
-        results = []
-        with st.status("Reading your page…", expanded=True) as status:
-            for i, im in enumerate(images):
-                if len(images) > 1:
-                    st.write(f"**Page {i + 1} of {len(images)}**")
-                results.append(ocr.process_page(im, use_pre, allow_v, force_v, on_step=st.write))
-            status.update(label="Finished reading", state="complete", expanded=False)
-
-        ss.images, ss.results = images, results
-        ss.title = names[0].rsplit(".", 1)[0] if names else "document"
-        ss.text = "\n\n".join(r.text for r in results)
-        for k in ("translation", "corrected", "summary", "answer", "audio", "facts", "pdf"):
-            ss.pop(k, None)
-        ss.saved_id = None
-        st.toast("Page read. Check the text below, then save or download it.", icon="✅")
-
-    with rail:
-        theme.steps(3 if "results" in ss else 1)
-
-    if "results" not in ss:
-        st.info("Choose a file or a sample, then press Digitize. A clear, well-lit photo works best.")
+    except ocr.UnreadableFile as e:
+        st.error(str(e))
         return
 
+    results = []
+    with st.status("Reading your page…", expanded=True) as status:
+        for i, im in enumerate(images):
+            if len(images) > 1:
+                st.write(f"**Page {i + 1} of {len(images)}**")
+            results.append(ocr.process_page(im, use_pre, allow_v, force_v, on_step=st.write))
+        text = "\n\n".join(r.text for r in results)
+        st.write("Translating so it reads in English")
+        und = ai_tools.understand(text)
+        status.update(label="Ready", state="complete", expanded=False)
+
+    reset_work()
+    ss.images, ss.results = images, results
+    ss.title = names[0].rsplit(".", 1)[0] if names else "document"
+    ss.text, ss.und, ss.und_text = text, und, text
+    ss.saved_id = None
+    ss.flash = "Page read. You can read it in English, side by side, or in Kannada."
+    st.rerun()
+
+
+# ============================================================== WORKSPACE
+def save_to_library(engines, avg, pages):
+    u = understanding()
+    tr = u["english"] if u else ""
+    if not tr:
+        tr = ai_tools.translate(ss.text)
+        tr = tr if ai_tools.translation_ok(tr) else ""
+    if ss.get("saved_id"):
+        storage.update_document(ss.saved_id, text=ss.text, translation=tr)
+    else:
+        ss.saved_id = storage.add_document(ss.title, ss.text, engines, avg, pages, tr)
+    st.toast("Saved to your library." if tr else
+             "Saved. No English was available, so search works in Kannada only.", icon="📚")
+
+
+def workspace_page():
     results, images = ss.results, ss.images
     avg = sum(r.avg_conf for r in results) / len(results)
     engines = ", ".join(sorted({r.engine for r in results}))
-    theme.result_header(avg, len(images), engines, results[0].variant)
+    flash = ss.pop("flash", None)
+    if flash:
+        st.toast(flash, icon="✅")
 
-    left, right = st.columns(2)
+    # ---- one compact bar: status, name, save, download, new page
+    b1, b2, b3, b4, b5 = st.columns([4.4, 2.6, 1.1, 1.5, 1.3], vertical_alignment="center")
+    with b1:
+        theme.result_bar(avg, len(images), engines, results[0].variant)
+    ss.title = b2.text_input("Document name", ss.title, label_visibility="collapsed",
+                             placeholder="Document name")
+    if b3.button("Save", type="primary", width="stretch"):
+        save_to_library(engines, avg, len(images))
+    with b4.popover("Download", width="stretch"):
+        u = understanding()
+        st.download_button("Word document (.docx)",
+                           exports.to_docx(ss.title, ss.text, u["english"] if u else "",
+                                           u["lines"] if u else None),
+                           f"{ss.title}.docx", width="stretch")
+        st.download_button("Kannada text (.txt)", exports.to_txt(ss.text), f"{ss.title}-kannada.txt",
+                           width="stretch")
+        if u:
+            st.download_button("English text (.txt)", exports.to_txt(u["english"]),
+                               f"{ss.title}-english.txt", width="stretch")
+        if st.button("Prepare searchable PDF", width="stretch"):
+            with st.spinner("Building the PDF…"):
+                ss.pdf = exports.to_searchable_pdf(images)
+        if ss.get("pdf"):
+            st.download_button("Searchable PDF", ss.pdf, f"{ss.title}.pdf", width="stretch")
+    if b5.button("New page", width="stretch"):
+        reset_work()
+        st.rerun()
+
+    # ---- photo (left) and text (right)
+    left, right = st.columns([5, 7], gap="large")
     idx = 0
     with left:
-        theme.plate_title("Your photo")
+        theme.plate_title("Your page")
         if len(images) > 1:
             idx = st.number_input("Page", 1, len(images), 1) - 1
         st.image(images[idx], width="stretch")
-        with st.expander("See what the reader saw (cleaned and cropped)"):
+        with st.expander("What the reader saw"):
             st.caption(f"Cleanup chosen automatically: {results[idx].variant}")
             st.image(results[idx].preprocessed, width="stretch")
+
     with right:
-        theme.plate_title("Digital text")
-        t_edit, t_check, t_copy = st.tabs(["Edit", "Check doubtful words", "Copy"])
-        with t_edit:
-            ss.text = st.text_area("Extracted text", ss.text, height=400,
-                                   label_visibility="collapsed")
-        with t_check:
-            if results[idx].words:
-                st.caption("Words the reader was unsure about are marked in yellow.")
-                st.markdown(f'<div class="big">{ocr.highlight_html(results[idx].words)}</div>',
-                            unsafe_allow_html=True)
-            else:
-                st.info("No word-by-word confidence is available for this page.")
-        with t_copy:
-            st.caption("Use the copy icon at the top right of the box.")
-            st.code(ss.text, language=None, wrap_lines=True)
-
-    theme.plate_title("Keep it")
-    a, b = st.columns([2, 1])
-    ss.title = a.text_input("Document name", ss.title)
-    b.markdown("<div style='height:1.85rem'></div>", unsafe_allow_html=True)
-    if b.button("Save to library", width="stretch"):
-        tr = ss.get("translation") or ""
-        if not ai_tools.translation_ok(tr):
-            with st.spinner("Translating so you can also search in English…"):
-                tr = ai_tools.translate(ss.text)
-        tr = tr if ai_tools.translation_ok(tr) else ""
-        if ss.get("saved_id"):
-            storage.update_document(ss.saved_id, text=ss.text, translation=tr)
+        seg = getattr(st, "segmented_control", None)
+        if seg:
+            view = seg("View", VIEWS, default="English", key="view", label_visibility="collapsed")
         else:
-            ss.saved_id = storage.add_document(ss.title, ss.text, engines, avg,
-                                               len(images), tr)
-        st.toast("Saved to your library." if tr else
-                 "Saved. English translation was unavailable, so search works in Kannada only.",
-                 icon="📚")
+            view = st.radio("View", VIEWS, horizontal=True, key="view", label_visibility="collapsed")
+        view = view or "English"
+        u = understanding()
 
-    d1, d2, d3 = st.columns(3)
-    d1.download_button("Download text (.txt)", exports.to_txt(ss.text), f"{ss.title}.txt",
-                       width="stretch")
-    d2.download_button("Download Word (.docx)", exports.to_docx(ss.title, ss.text),
-                       f"{ss.title}.docx", width="stretch")
-    if ss.get("pdf"):
-        d3.download_button("Download searchable PDF", ss.pdf, f"{ss.title}.pdf", width="stretch")
-    elif d3.button("Make a searchable PDF", width="stretch"):
-        with st.spinner("Building the PDF…"):
-            ss.pdf = exports.to_searchable_pdf(images)
-        st.rerun()
-
-    understand_tools(ss.text)
-
-
-def understand_tools(text):
-    theme.plate_title("Understand it")
-    t1, t2, t3, t4, t5 = st.tabs(["English", "Summary", "Key facts", "Listen", "Ask"])
-
-    with t1:
-        if st.button("Translate to English"):
-            ss.corrected = ""
-            if llm.available():
-                try:
-                    with st.spinner("Translating by meaning…"):
-                        ss.corrected, ss.translation = ai_tools.smart_translate(text)
-                except Exception as e:
-                    st.warning("The AI helper was unavailable, so this is the free word-by-word "
-                               f"translation. ({e})")
-                    with st.spinner("Translating…"):
-                        ss.translation = ai_tools.translate_free(text)
+        if view in ("English", "Side by side"):
+            if not u:
+                st.info("English isn't available right now (the translation service did not answer).")
+                if st.button("Try translating again"):
+                    refresh_understanding()
+                    st.rerun()
             else:
-                with st.spinner("Translating…"):
-                    ss.translation = ai_tools.translate_free(text)
-        if ss.get("translation"):
-            st.markdown("**English meaning**")
-            st.write(ss.translation)
-            if ss.get("corrected"):
-                with st.expander("Kannada with the reading mistakes fixed"):
-                    st.write(ss.corrected)
-                    if st.button("Use this corrected text"):
-                        ss.text = ss.corrected
+                if translation_is_stale():
+                    st.warning("You edited the Kannada after this translation was made.")
+                    if st.button("Update the English"):
+                        refresh_understanding()
                         st.rerun()
-        if not llm.available():
-            st.caption("This is word-by-word and cannot fix reading mistakes. "
-                       "A free Gemini key gives natural, meaning-aware translation.")
+                if view == "English":
+                    note = ("Meaning-aware translation by the AI helper, with reading mistakes fixed."
+                            if u["source"] == "ai" else
+                            "Free word-by-word translation. A free Gemini key makes it read naturally.")
+                    theme.english_plate(u["english"], note)
+                    with st.expander("Copy the English text"):
+                        st.code(u["english"], language=None, wrap_lines=True)
+                else:
+                    theme.pairs_view(u["lines"])
+        else:
+            t_edit, t_doubt = st.tabs(["Edit", "Doubtful words"])
+            with t_edit:
+                ss.text = st.text_area("Kannada text", ss.text, height=380,
+                                       label_visibility="collapsed")
+                if u and u.get("corrected") and "\n".join(u["corrected"]) != "\n".join(
+                        l.strip() for l in ss.text.splitlines() if l.strip()):
+                    if st.button("Use the AI-corrected Kannada"):
+                        ss.text = "\n".join(u["corrected"])
+                        ss.und_text = ss.text
+                        st.rerun()
+            with t_doubt:
+                if results[idx].words:
+                    st.caption("Words the reader was unsure about are marked in yellow.")
+                    theme.kannada_plate(ocr.highlight_html(results[idx].words))
+                else:
+                    st.info("No word-by-word confidence is available for this page.")
 
-    with t2:
+    # ---- tools
+    theme.plate_title("Do more with it")
+    t_sum, t_facts, t_ask, t_listen = st.tabs(["Summary", "Key facts", "Ask a question", "Listen"])
+    with t_sum:
         if not llm.available():
             st.info(NEEDS_KEY)
-        elif st.button("Summarize"):
-            res = run_ai(ai_tools.summarize, text, spinner="Summarizing…")
+        elif st.button("Summarize this page"):
+            res = run_ai(ai_tools.summarize, best_text(), spinner="Summarizing…")
             if res:
                 ss.summary = res
         if ss.get("summary"):
             st.write(ss.summary)
-
-    with t3:
+    with t_facts:
         if not llm.available():
             st.info(NEEDS_KEY)
         elif st.button("Find dates, names and actions"):
-            res = run_ai(ai_tools.key_facts, text, spinner="Reading carefully…")
+            res = run_ai(ai_tools.key_facts, best_text(), spinner="Reading carefully…")
             if res:
                 ss.facts = res
         if ss.get("facts"):
             st.write(ss.facts)
-
-    with t4:
-        if st.button("Read aloud in Kannada"):
+    with t_ask:
+        if not llm.available():
+            st.info(NEEDS_KEY)
+        else:
+            q = st.text_input("Ask about this page, in English or Kannada",
+                              placeholder="For example: What is the last date mentioned?")
+            if st.button("Ask") and q:
+                res = run_ai(ai_tools.ask, best_text(), q, spinner="Looking through the page…")
+                if res:
+                    ss.answer = res
+            if ss.get("answer"):
+                st.write(ss.answer)
+    with t_listen:
+        c1, c2 = st.columns(2)
+        want = None
+        if c1.button("Hear it in Kannada", width="stretch"):
+            want = ("kn", ss.text)
+        if understanding() and c2.button("Hear it in English", width="stretch"):
+            want = ("en", understanding()["english"])
+        if want:
             try:
                 with st.spinner("Preparing the audio…"):
-                    ss.audio = ai_tools.speak(text)
+                    ss.audio = ai_tools.speak(want[1], want[0])
             except Exception:
                 st.error("Audio could not be created. It needs an internet connection; try again.")
         if ss.get("audio"):
             st.audio(ss.audio, format="audio/mp3")
 
-    with t5:
-        if not llm.available():
-            st.info(NEEDS_KEY)
-        else:
-            q = st.text_input("Ask about this document, in Kannada or English",
-                              placeholder="For example: What is the last date mentioned?")
-            if st.button("Ask") and q:
-                res = run_ai(ai_tools.ask, text, q, spinner="Looking through the document…")
-                if res:
-                    ss.answer = res
-            if ss.get("answer"):
-                st.write(ss.answer)
+
+def digitize_page():
+    if "results" in ss:
+        workspace_page()
+    else:
+        start_page()
 
 
 # ================================================================ LIBRARY
@@ -272,16 +335,18 @@ def library_page():
                 st.write(h["snippet"])
     docs = storage.list_documents()
     if not docs:
-        st.info("Nothing saved yet. Digitize a page and press Save to library. "
+        st.info("Nothing saved yet. Digitize a page and press Save. "
                 "It will appear here, searchable in Kannada and English.")
     for d in docs:
         with st.expander(f"{d['title']}: {d['pages']} page(s), {d['avg_conf']:.0f}% confidence, "
                          f"{d['created'][:10]}"):
             full = storage.get_document(d["id"])
-            st.text_area("Text", full["text"], height=200, key=f"t{d['id']}")
             if full["translation"]:
-                st.caption("English translation")
+                st.markdown("**English**")
                 st.write(full["translation"])
+            st.markdown("**Kannada**")
+            st.text_area("Text", full["text"], height=200, key=f"t{d['id']}",
+                         label_visibility="collapsed")
             c1, c2 = st.columns(2)
             if c1.button("Save edits", key=f"s{d['id']}"):
                 storage.update_document(d["id"], text=ss[f"t{d['id']}"])
@@ -298,9 +363,9 @@ def about_page():
         ("The problem", "Karnataka's knowledge sits on paper: notices, textbooks, newspapers and "
                         "handwritten records. It cannot be searched, copied, translated or read aloud."),
         ("What this does", "It turns photos, scans and PDFs into editable, searchable Kannada text, "
-                           "then helps you understand it: translate, summarize, find key facts, listen, ask."),
+                           "and puts the English meaning right beside it for anyone who does not read Kannada."),
         ("Who it helps", "Students, elders who struggle with small print, people learning Kannada, "
-                         "researchers, and offices digitizing records."),
+                         "newcomers to Karnataka, researchers, and offices digitizing records."),
     ])
     theme.plate_title("How it works")
     st.graphviz_chart("""
@@ -313,9 +378,10 @@ digraph G {
   C [label="Tesseract\\nKannada reader"];
   D [label="Find the text,\\ncrop and\\nread again"];
   E [label="AI reader\\nfor handwriting", fillcolor="#13201B", fontcolor="white", color="#13201B"];
-  F [label="Editable\\ntext"];
-  G [label="Search, export,\\ntranslate, key facts,\\nlisten, ask", fillcolor="#E8A317", color="#B97F00"];
-  A -> B -> C -> D -> F -> G;
+  F [label="Kannada\\ntext"];
+  H [label="English\\nmeaning"];
+  G [label="Search, export,\\nsummary, key facts,\\nlisten, ask", fillcolor="#E8A317", color="#B97F00"];
+  A -> B -> C -> D -> F -> H -> G;
   C -> E [style=dashed, label=" low\\n confidence"];
   E -> F [style=dashed];
 }

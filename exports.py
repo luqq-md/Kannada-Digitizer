@@ -14,16 +14,36 @@ def to_txt(text: str) -> bytes:
     return text.encode("utf-8")
 
 
-def to_docx(title: str, text: str) -> bytes:
+def to_docx(title: str, text: str, english: str = "", pairs=None) -> bytes:
+    """Word file: the English meaning first (if we have it), then the Kannada text, then an
+    optional line-by-line table so a reader can follow along."""
     doc = Document()
     doc.add_heading(title, level=1)
-    for line in text.split("\n"):
+
+    def para(txt, kannada=True, size=12):
         p = doc.add_paragraph()
-        run = p.add_run(line)
-        run.font.size = Pt(12)
-        run.font.name = "Noto Sans Kannada"
-        # make Word use the Kannada font for complex-script text too
-        run._element.rPr.rFonts.set(qn("w:cs"), "Noto Sans Kannada")
+        run = p.add_run(txt)
+        run.font.size = Pt(size)
+        if kannada:
+            run.font.name = "Noto Sans Kannada"
+            run._element.rPr.rFonts.set(qn("w:cs"), "Noto Sans Kannada")   # complex-script font
+        return p
+
+    if english:
+        doc.add_heading("English meaning", level=2)
+        for block in english.split("\n"):
+            if block.strip():
+                para(block, kannada=False)
+    doc.add_heading("Kannada text", level=2)
+    for line in text.split("\n"):
+        para(line)
+    if pairs:
+        doc.add_heading("Line by line", level=2)
+        table = doc.add_table(rows=0, cols=2)
+        table.style = "Light Grid Accent 1"
+        for kn, en in pairs:
+            cells = table.add_row().cells
+            cells[0].text, cells[1].text = kn, en
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
