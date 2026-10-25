@@ -188,6 +188,83 @@ hr{border-color:var(--soap2);}
 .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1.4rem;margin:.6rem 0 1.2rem;}
 .stApp .legend b{font:700 1.08rem var(--display);display:block;margin-bottom:.3rem;}
 .stApp .legend span{color:var(--ink2);line-height:1.5;font-size:.97rem;}
+/* ================= readable in ANY browser mode (light or dark) =================
+   Streamlit follows the visitor's system theme, which can paint pale text on our light page.
+   So every visible piece of main-area text and every widget is coloured explicitly here. */
+:root{color-scheme:light;}
+.stApp [data-testid="stMain"] :where(p,span,label,li,small,h1,h2,h3,h4,h5,h6,summary,td,th,strong,em,div[data-testid="stCaptionContainer"]){color:var(--ink);}
+.stApp [data-testid="stMain"] a{color:var(--kumkuma);}
+.stApp [data-testid="stMain"] [data-testid="stCaptionContainer"] *{color:var(--ink2);}
+.stApp [data-testid="stMain"] [data-testid="stWidgetLabel"] *{color:var(--ink);font-weight:600;}
+.stApp [data-testid="stMain"] [data-testid="stTooltipIcon"] svg{color:var(--silver);}
+
+/* toolbar: hide Streamlit's Deploy / menu chrome so it looks like a product */
+[data-testid="stToolbar"],[data-testid="stDecoration"],[data-testid="stStatusWidget"]{display:none!important;}
+
+/* ---- upload: a large, obvious drop slot with a gold call-to-action ---- */
+.stApp [data-testid="stFileUploaderDropzone"]{background:#F6F5EA;border:2px dashed var(--leaf2);
+  border-radius:10px;padding:1.6rem 1.8rem;display:flex;align-items:center;gap:1.4rem;min-height:110px;}
+.stApp [data-testid="stFileUploaderDropzone"]:hover{border-color:var(--kumkuma);background:#FBFAF0;}
+.stApp [data-testid="stFileUploaderDropzone"] button{background:var(--turmeric)!important;color:var(--ink)!important;
+  border:0!important;border-radius:6px!important;padding:.7rem 1.6rem!important;font-weight:700!important;font-size:1.02rem!important;
+  box-shadow:0 10px 18px -10px rgba(185,127,0,.9);transition:transform .12s,background .15s;}
+.stApp [data-testid="stFileUploaderDropzone"] button:hover{background:#F2B52B!important;transform:translateY(-2px);}
+.stApp [data-testid="stFileUploaderDropzone"] button *{color:var(--ink)!important;}
+.stApp [data-testid="stFileUploaderDropzoneInstructions"] *{color:var(--ink2)!important;font-size:.95rem;}
+.stApp [data-testid="stFileUploaderFile"]{background:#fff;border:1px solid var(--soap2);border-radius:6px;padding:.3rem .6rem;}
+.stApp [data-testid="stFileUploaderFile"] *{color:var(--ink)!important;}
+
+/* ---- toggle and checkboxes ---- */
+.stApp [data-testid="stCheckbox"] label > div:nth-child(2){background:#fff!important;border:2px solid var(--ink2)!important;}
+.stApp [data-testid="stCheckbox"] label:has(input:checked) > div:nth-child(2){background:var(--kumkuma)!important;border-color:var(--kumkuma)!important;}
+.stApp [data-testid="stCheckbox"] label:has(input[role="switch"]) > div:nth-child(2){background:#B9C4BD!important;border-color:#B9C4BD!important;}
+.stApp [data-testid="stCheckbox"] label:has(input[role="switch"]:checked) > div:nth-child(2){background:var(--kumkuma)!important;border-color:var(--kumkuma)!important;}
+.stApp [data-testid="stCheckbox"] label:has(input[role="switch"]) > div:nth-child(2) > div{background:#fff!important;box-shadow:0 1px 3px rgba(0,0,0,.35);}
+.stApp [data-testid="stCheckbox"] label:has(input:disabled){opacity:.5;}
+
+/* ---- tabs ---- */
+.stApp [data-testid="stMain"] button[data-baseweb="tab"] *{color:var(--ink2)!important;font-weight:600;}
+.stApp [data-testid="stMain"] button[data-baseweb="tab"][aria-selected="true"] *{color:var(--ink)!important;font-weight:700;}
+.stApp [data-testid="stMain"] button[data-baseweb="tab"]:hover *{color:var(--kumkuma)!important;}
+
+/* ---- inputs ---- */
+.stApp [data-baseweb="input"]{background:#fff!important;border:1.5px solid var(--silver)!important;border-radius:6px!important;}
+.stApp [data-baseweb="input"] [data-baseweb="base-input"]{background:transparent!important;border:0!important;}
+.stApp [data-testid="stTextInputRootElement"],.stApp [data-testid="stNumberInputContainer"]{background:#fff!important;border:1.5px solid var(--silver)!important;border-radius:6px!important;}
+.stApp [data-testid="stTextInputRootElement"]:focus-within,.stApp [data-testid="stNumberInputContainer"]:focus-within{border-color:var(--kumkuma)!important;box-shadow:0 0 0 3px rgba(163,31,26,.15);}
+.stApp [data-testid="stTextAreaRootElement"]{background:transparent!important;border:0!important;box-shadow:none!important;}
+.stApp [data-baseweb="input"]:focus-within{border-color:var(--kumkuma)!important;box-shadow:0 0 0 3px rgba(163,31,26,.15);}
+.stApp [data-testid="stMain"] input{background:#fff!important;color:var(--ink)!important;-webkit-text-fill-color:var(--ink);}
+.stApp [data-testid="stMain"] input::placeholder{color:#6B7A72!important;-webkit-text-fill-color:#6B7A72;}
+.stApp [data-testid="stTextArea"] [data-baseweb="textarea"],.stApp [data-testid="stTextArea"] [data-baseweb="base-input"]{background:transparent!important;border:0!important;box-shadow:none!important;}
+
+/* ---- expanders, status panel, alerts, code ---- */
+.stApp [data-testid="stExpander"] summary,.stApp [data-testid="stExpander"] summary *{color:var(--ink)!important;font-weight:600;}
+.stApp [data-testid="stExpander"] details{background:rgba(255,255,255,.4);}
+.stApp [data-testid="stStatus"],.stApp [data-testid="stExpander"][data-testid="stStatus"]{border-left:4px solid var(--turmeric);}
+.stApp [data-testid="stAlert"]{background:rgba(232,163,23,.14)!important;}
+.stApp [data-testid="stCode"] pre,.stApp [data-testid="stCode"] code{background:#F1EEC9!important;color:var(--leafink)!important;
+  font-family:var(--manu)!important;font-size:1.1rem!important;line-height:1.9!important;}
+.stApp [data-testid="stCode"] pre{border:1px solid var(--leaf2);border-radius:8px;}
+.stApp [data-testid="stCode"] code *{color:var(--leafink)!important;}
+.stApp [data-testid="stMain"] [data-testid="stVerticalBlockBorderWrapper"]{background:rgba(255,255,255,.45);border-color:var(--soap2);}
+
+/* ---- buttons: text must stay legible in every state ---- */
+.stApp .stButton > button[kind="primary"] *,.stApp .stButton > button[kind="primary"]:hover *{color:#fff!important;}
+.stApp .stButton > button[kind="secondary"]:hover *,.stApp .stDownloadButton > button:hover *{color:#fff!important;}
+.stApp .stButton > button[kind="secondary"] *,.stApp .stDownloadButton > button *{color:var(--ink);}
+.stApp .stButton > button:disabled,.stApp .stButton > button:disabled *{color:#5B6A62!important;}
+.stApp .stButton > button[kind="primary"]:disabled{background:#CDD3CC!important;border-color:#CDD3CC!important;box-shadow:none!important;}
+.stApp .stButton > button[kind="primary"]:disabled *{color:#4A5851!important;}
+
+/* ---- gentle interactivity (answers a hover or a click, nothing plays by itself) ---- */
+.stApp [data-testid="stImage"] img{transition:transform .18s,box-shadow .18s;}
+.stApp [data-testid="stImage"]:hover img{transform:translateY(-3px);box-shadow:0 1px 0 rgba(0,0,0,.18),0 24px 30px -18px rgba(19,32,27,.6);}
+.stApp .stButton > button,.stApp .stDownloadButton > button{min-height:2.7rem;}
+.stApp [data-testid="stToast"]{border-left:4px solid var(--turmeric);}
+.stApp .chip.vision{background:var(--ink);color:#fff;}
+.stApp .chip.vision *{color:#fff;}
+
 """
 
 

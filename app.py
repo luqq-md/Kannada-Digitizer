@@ -1,14 +1,14 @@
-"""ಕನ್ನಡ ಡಿಜಿಟೈಸರ್ - Kannada Text Digitizer (Streamlit app).
+"""ಕನ್ನಡ ಡಿಜಿಟೈಸರ್ - Kannada Digitizer (Streamlit app).
 
 Run:  streamlit run app.py
 """
-import os
 from pathlib import Path
 
 import streamlit as st
 
 import ai_tools
 import exports
+import llm
 import ocr_pipeline as ocr
 import storage
 import theme
@@ -17,21 +17,33 @@ st.set_page_config(page_title="Kannada Digitizer · ಕನ್ನಡ ಡಿಜಿ
 storage.init_db()
 theme.inject()
 
-
-
 # ------------------------------------------------------------------ sidebar
-import llm
 theme.sidebar_brand()
-page = st.sidebar.radio("Go to", ["Digitize", "Library & Search", "About"], label_visibility="collapsed")
+page = st.sidebar.radio("Go to", ["Digitize", "Library & Search", "About"],
+                        label_visibility="collapsed")
 st.sidebar.divider()
 theme.sidebar_status(llm.label() if llm.available() else None)
 
 ss = st.session_state
 
 SAMPLE_DIR = Path(__file__).parent / "samples"
-SAMPLES = [("📄 Tilted notice", "notice_tilted.png"),
-           ("📰 Noisy textbook page", "textbook_noisy.png"),
-           ("📱 Phone-style photo (white on dark)", "hard_letter_a.png")]
+SAMPLES = [("Tilted notice", "notice_tilted.png"),
+           ("Noisy textbook page", "textbook_noisy.png"),
+           ("Phone-style photo, white on dark", "hard_letter_a.png")]
+
+NEEDS_KEY = "Add a free GEMINI_API_KEY in the app's Secrets to turn this on."
+
+
+def run_ai(fn, *args, spinner="Thinking…"):
+    """Run an AI call; show a plain-language message instead of a crash if it fails."""
+    try:
+        with st.spinner(spinner):
+            return fn(*args)
+    except llm.AIError as e:
+        st.error(str(e))
+    except Exception as e:                      # never show a raw traceback to visitors
+        st.error(f"Something went wrong ({type(e).__name__}). Please try again.")
+    return None
 
 
 # ============================================================== DIGITIZE
@@ -39,28 +51,36 @@ def digitize_page():
     theme.hero()
     rail = st.container()
 
-    files = st.file_uploader("Upload image or PDF", type=["png", "jpg", "jpeg", "webp", "pdf"],
+    theme.plate_title("Add your page")
+    files = st.file_uploader("Drop a photo, scan or PDF here, or browse",
+                             type=["png", "jpg", "jpeg", "webp", "pdf"],
                              accept_multiple_files=True)
-    cam = st.camera_input("…or take a photo", label_visibility="collapsed") \
-        if st.toggle("Use camera") else None
+    use_cam = st.toggle("Use the camera instead")
+    cam = st.camera_input("Camera", label_visibility="collapsed") if use_cam else None
 
     avail = [(l, f) for l, f in SAMPLES if (SAMPLE_DIR / f).exists()]
-    if avail and not files:
-        st.markdown('<p class="try-label">No file handy? Pick a sample, then press Digitize.</p>', unsafe_allow_html=True)
+    if avail and not files and not cam:
+        st.markdown('<p class="try-label">No file handy? Try a sample.</p>', unsafe_allow_html=True)
         for col, (label, fname) in zip(st.columns(len(avail)), avail):
-            if col.button(label, key="s_" + fname):
-                ss.sample = fname
-        if ss.get("sample"):
-            st.info(f"Sample chosen: {ss.sample}. Press Digitize, or upload your own file instead.")
+            with col:
+                st.image(str(SAMPLE_DIR / fname), width="stretch")
+                chosen = ss.get("sample") == fname
+                if st.button(("Selected: " if chosen else "") + label, key="s_" + fname,
+                             type="primary" if chosen else "secondary", width="stretch"):
+                    ss.sample = fname
+                    st.rerun()
 
+    ai_on = ocr.vision_available()
     c1, c2, c3 = st.columns(3)
-    use_pre = c1.checkbox("Clean image first (recommended)", True)
-    allow_v = c2.checkbox("Auto-use vision model for hard pages", True,
-                          disabled=not ocr.vision_available())
-    force_v = c3.checkbox("Handwriting mode (always use vision model)", False,
-                          disabled=not ocr.vision_available())
+    use_pre = c1.checkbox("Clean the image first", True,
+                          help="Straightens the page, flips light-on-dark text, removes glare.")
+    allow_v = c2.checkbox("Let the AI reader help on hard pages", True, disabled=not ai_on,
+                          help="" if ai_on else NEEDS_KEY)
+    force_v = c3.checkbox("Handwriting mode (AI reader always)", False, disabled=not ai_on,
+                          help="" if ai_on else NEEDS_KEY)
 
-    if st.button("🔍 Digitize", type="primary", disabled=not (files or cam or ss.get("sample"))):
+    ready = bool(files or cam or ss.get("sample"))
+    if st.button("Digitize this page", type="primary", disabled=not ready):
         images, names = [], []
         for f in (files or []):
             for im in ocr.load_pages(f.getvalue(), f.name):
@@ -75,27 +95,26 @@ def digitize_page():
             names.append(sp.name)
 
         results = []
-        bar = st.progress(0.0, "Reading…")
-        for i, im in enumerate(images):
-            results.append(ocr.process_page(im, use_pre, allow_v, force_v))
-            bar.progress((i + 1) / len(images), f"Page {i + 1} of {len(images)}")
-        bar.empty()
+        with st.status("Reading your page…", expanded=True) as status:
+            for i, im in enumerate(images):
+                if len(images) > 1:
+                    st.write(f"**Page {i + 1} of {len(images)}**")
+                results.append(ocr.process_page(im, use_pre, allow_v, force_v, on_step=st.write))
+            status.update(label="Finished reading", state="complete", expanded=False)
 
         ss.images, ss.results = images, results
         ss.title = names[0].rsplit(".", 1)[0] if names else "document"
         ss.text = "\n\n".join(r.text for r in results)
-        ss.pop("translation", None)
-        ss.pop("summary", None)
-        ss.pop("answer", None)
-        ss.pop("audio", None)
-        ss.pop("facts", None)
+        for k in ("translation", "corrected", "summary", "answer", "audio", "facts", "pdf"):
+            ss.pop(k, None)
         ss.saved_id = None
+        st.toast("Page read. Check the text below, then save or download it.", icon="✅")
 
     with rail:
         theme.steps(3 if "results" in ss else 1)
 
     if "results" not in ss:
-        st.info("Upload a file or pick a sample to begin. A clear, well-lit photo works best.")
+        st.info("Choose a file or a sample, then press Digitize. A clear, well-lit photo works best.")
         return
 
     results, images = ss.results, ss.images
@@ -104,25 +123,37 @@ def digitize_page():
     theme.result_header(avg, len(images), engines, results[0].variant)
 
     left, right = st.columns(2)
+    idx = 0
     with left:
         theme.plate_title("Your photo")
-        idx = st.number_input("Page", 1, len(images), 1) - 1 if len(images) > 1 else 0
+        if len(images) > 1:
+            idx = st.number_input("Page", 1, len(images), 1) - 1
         st.image(images[idx], width="stretch")
-        with st.expander("See what the reader saw (cleaned and cropped)", expanded=False):
-            st.caption(f"Method chosen automatically: {results[idx].variant}")
+        with st.expander("See what the reader saw (cleaned and cropped)"):
+            st.caption(f"Cleanup chosen automatically: {results[idx].variant}")
             st.image(results[idx].preprocessed, width="stretch")
     with right:
-        theme.plate_title("Digital text. Edit anything that looks wrong.")
-        ss.text = st.text_area("text", ss.text, height=420, label_visibility="collapsed")
-        if results[idx].words:
-            with st.expander("Show uncertain words in yellow"):
+        theme.plate_title("Digital text")
+        t_edit, t_check, t_copy = st.tabs(["Edit", "Check doubtful words", "Copy"])
+        with t_edit:
+            ss.text = st.text_area("Extracted text", ss.text, height=400,
+                                   label_visibility="collapsed")
+        with t_check:
+            if results[idx].words:
+                st.caption("Words the reader was unsure about are marked in yellow.")
                 st.markdown(f'<div class="big">{ocr.highlight_html(results[idx].words)}</div>',
                             unsafe_allow_html=True)
+            else:
+                st.info("No word-by-word confidence is available for this page.")
+        with t_copy:
+            st.caption("Use the copy icon at the top right of the box.")
+            st.code(ss.text, language=None, wrap_lines=True)
 
-    st.divider()
-    a, b, c, d = st.columns(4)
+    theme.plate_title("Keep it")
+    a, b = st.columns([2, 1])
     ss.title = a.text_input("Document name", ss.title)
-    if b.button("💾 Save to library"):
+    b.markdown("<div style='height:1.85rem'></div>", unsafe_allow_html=True)
+    if b.button("Save to library", width="stretch"):
         tr = ss.get("translation") or ""
         if not ai_tools.translation_ok(tr):
             with st.spinner("Translating so you can also search in English…"):
@@ -133,78 +164,99 @@ def digitize_page():
         else:
             ss.saved_id = storage.add_document(ss.title, ss.text, engines, avg,
                                                len(images), tr)
-        st.success("Saved! Search it in the Library (Kannada or English)."
-                   if tr else "Saved! (English translation unavailable right now, "
-                              "so search works in Kannada only.)")
+        st.toast("Saved to your library." if tr else
+                 "Saved. English translation was unavailable, so search works in Kannada only.",
+                 icon="📚")
 
-    theme.plate_title("Take it with you")
     d1, d2, d3 = st.columns(3)
-    d1.download_button("⬇ Text (.txt)", exports.to_txt(ss.text), f"{ss.title}.txt")
-    d2.download_button("⬇ Word (.docx)", exports.to_docx(ss.title, ss.text), f"{ss.title}.docx")
-    if d3.button("Prepare searchable PDF"):
-        with st.spinner("Building PDF…"):
-            ss.pdf = exports.to_searchable_pdf(images)
+    d1.download_button("Download text (.txt)", exports.to_txt(ss.text), f"{ss.title}.txt",
+                       width="stretch")
+    d2.download_button("Download Word (.docx)", exports.to_docx(ss.title, ss.text),
+                       f"{ss.title}.docx", width="stretch")
     if ss.get("pdf"):
-        d3.download_button("⬇ Searchable PDF", ss.pdf, f"{ss.title}.pdf")
+        d3.download_button("Download searchable PDF", ss.pdf, f"{ss.title}.pdf", width="stretch")
+    elif d3.button("Make a searchable PDF", width="stretch"):
+        with st.spinner("Building the PDF…"):
+            ss.pdf = exports.to_searchable_pdf(images)
+        st.rerun()
 
     understand_tools(ss.text)
 
 
 def understand_tools(text):
-    st.divider()
     theme.plate_title("Understand it")
-    t1, t2, t3, t4, t5 = st.tabs(["🌐 English", "📝 Summary", "📌 Key facts", "🔊 Listen", "💬 Ask"])
+    t1, t2, t3, t4, t5 = st.tabs(["English", "Summary", "Key facts", "Listen", "Ask"])
+
     with t1:
         if st.button("Translate to English"):
-            with st.spinner("Translating…"):
-                ss.corrected = ""
-                if ai_tools.ai_available():
-                    try:
+            ss.corrected = ""
+            if llm.available():
+                try:
+                    with st.spinner("Translating by meaning…"):
                         ss.corrected, ss.translation = ai_tools.smart_translate(text)
-                    except Exception:
-                        ss.translation = ai_tools.translate(text)
-                else:
-                    ss.translation = ai_tools.translate(text)
+                except Exception as e:
+                    st.warning("The AI helper was unavailable, so this is the free word-by-word "
+                               f"translation. ({e})")
+                    with st.spinner("Translating…"):
+                        ss.translation = ai_tools.translate_free(text)
+            else:
+                with st.spinner("Translating…"):
+                    ss.translation = ai_tools.translate_free(text)
         if ss.get("translation"):
             st.markdown("**English meaning**")
             st.write(ss.translation)
             if ss.get("corrected"):
-                with st.expander("Kannada with OCR mistakes fixed"):
+                with st.expander("Kannada with the reading mistakes fixed"):
                     st.write(ss.corrected)
                     if st.button("Use this corrected text"):
                         ss.text = ss.corrected
                         st.rerun()
-        if not ai_tools.ai_available():
-            st.caption("💡 Free translation is word-by-word and can't fix OCR mistakes. "
-                       "Add a free GEMINI_API_KEY for natural, meaning-aware translation.")
+        if not llm.available():
+            st.caption("This is word-by-word and cannot fix reading mistakes. "
+                       "A free Gemini key gives natural, meaning-aware translation.")
+
     with t2:
-        if st.button("Summarize"):
-            with st.spinner("Summarizing…"):
-                ss.summary = ai_tools.summarize(text)
+        if not llm.available():
+            st.info(NEEDS_KEY)
+        elif st.button("Summarize"):
+            res = run_ai(ai_tools.summarize, text, spinner="Summarizing…")
+            if res:
+                ss.summary = res
         if ss.get("summary"):
             st.write(ss.summary)
+
     with t3:
-        if st.button("Find key facts (dates, names, actions)"):
-            with st.spinner("Reading carefully…"):
-                ss.facts = ai_tools.key_facts(text)
+        if not llm.available():
+            st.info(NEEDS_KEY)
+        elif st.button("Find dates, names and actions"):
+            res = run_ai(ai_tools.key_facts, text, spinner="Reading carefully…")
+            if res:
+                ss.facts = res
         if ss.get("facts"):
             st.write(ss.facts)
+
     with t4:
         if st.button("Read aloud in Kannada"):
             try:
-                with st.spinner("Generating audio…"):
+                with st.spinner("Preparing the audio…"):
                     ss.audio = ai_tools.speak(text)
-            except Exception as e:
-                st.error(f"Audio needs an internet connection. ({e})")
+            except Exception:
+                st.error("Audio could not be created. It needs an internet connection; try again.")
         if ss.get("audio"):
             st.audio(ss.audio, format="audio/mp3")
+
     with t5:
-        q = st.text_input("Ask a question about this document (Kannada or English)")
-        if st.button("Ask") and q:
-            with st.spinner("Thinking…"):
-                ss.answer = ai_tools.ask(text, q)
-        if ss.get("answer"):
-            st.write(ss.answer)
+        if not llm.available():
+            st.info(NEEDS_KEY)
+        else:
+            q = st.text_input("Ask about this document, in Kannada or English",
+                              placeholder="For example: What is the last date mentioned?")
+            if st.button("Ask") and q:
+                res = run_ai(ai_tools.ask, text, q, spinner="Looking through the document…")
+                if res:
+                    ss.answer = res
+            if ss.get("answer"):
+                st.write(ss.answer)
 
 
 # ================================================================ LIBRARY
@@ -213,17 +265,18 @@ def library_page():
     q = st.text_input("Search your documents", placeholder="Try ಪರೀಕ್ಷೆ or exam")
     if q:
         hits = storage.search(q)
-        st.caption(f"{len(hits)} result(s)")
+        st.caption(f"{len(hits)} result{'s' if len(hits) != 1 else ''}")
         for h in hits:
             with st.container(border=True):
-                st.markdown(f"**{h['title']}**  (id {h['id']}) · matched in {h['matched']}")
+                st.markdown(f"**{h['title']}**  matched in {h['matched']}")
                 st.write(h["snippet"])
-    st.divider()
     docs = storage.list_documents()
     if not docs:
-        st.info("Nothing saved yet. Digitize a page and press Save to library. It will appear here, searchable in Kannada and English.")
+        st.info("Nothing saved yet. Digitize a page and press Save to library. "
+                "It will appear here, searchable in Kannada and English.")
     for d in docs:
-        with st.expander(f"📄 {d['title']}  —  {d['pages']} page(s), {d['avg_conf']:.0f}% conf, {d['created'][:10]}"):
+        with st.expander(f"{d['title']}: {d['pages']} page(s), {d['avg_conf']:.0f}% confidence, "
+                         f"{d['created'][:10]}"):
             full = storage.get_document(d["id"])
             st.text_area("Text", full["text"], height=200, key=f"t{d['id']}")
             if full["translation"]:
@@ -232,7 +285,7 @@ def library_page():
             c1, c2 = st.columns(2)
             if c1.button("Save edits", key=f"s{d['id']}"):
                 storage.update_document(d["id"], text=ss[f"t{d['id']}"])
-                st.success("Updated")
+                st.toast("Changes saved.", icon="✅")
             if c2.button("Delete", key=f"x{d['id']}"):
                 storage.delete_document(d["id"])
                 st.rerun()
@@ -255,15 +308,15 @@ digraph G {
   rankdir=LR; bgcolor="transparent"; nodesep=0.35; ranksep=0.45;
   node [shape=box, style="rounded,filled", fillcolor="#EFE7B8", fontname="Helvetica", fontsize=15, color="#BDB27A", margin="0.18,0.12"];
   edge [color="#2B3A33", fontname="Helvetica", fontsize=12];
-  A [label="Photo, scan\nor PDF"];
-  B [label="Clean-up\nflip colours,\nstraighten,\nremove glare"];
-  C [label="Tesseract\nKannada reader"];
-  D [label="Find the text,\ncrop and\nread again"];
-  E [label="AI reader\nfor handwriting", fillcolor="#13201B", fontcolor="white", color="#13201B"];
-  F [label="Editable\ntext"];
-  G [label="Search, export,\ntranslate, key facts,\nlisten, ask", fillcolor="#E8A317", color="#B97F00"];
+  A [label="Photo, scan\\nor PDF"];
+  B [label="Clean-up\\nflip colours,\\nstraighten,\\nremove glare"];
+  C [label="Tesseract\\nKannada reader"];
+  D [label="Find the text,\\ncrop and\\nread again"];
+  E [label="AI reader\\nfor handwriting", fillcolor="#13201B", fontcolor="white", color="#13201B"];
+  F [label="Editable\\ntext"];
+  G [label="Search, export,\\ntranslate, key facts,\\nlisten, ask", fillcolor="#E8A317", color="#B97F00"];
   A -> B -> C -> D -> F -> G;
-  C -> E [style=dashed, label=" low\n confidence"];
+  C -> E [style=dashed, label=" low\\n confidence"];
   E -> F [style=dashed];
 }
 """)

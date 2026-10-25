@@ -61,14 +61,19 @@ def _translate_paragraphs(text, translate_fn, size):
 
 
 def translate(text: str, target="en") -> str:
-    """Kannada -> English. With an API key: meaning-aware (fixes OCR mistakes).
-    Without: Google, then MyMemory (free)."""
-    errors = []
+    """Kannada -> English. With an AI key: meaning-aware (fixes OCR mistakes).
+    Without (or if the AI is unavailable): free word-by-word translation."""
     if ai_available():
         try:
             return smart_translate(text)[1]
-        except Exception as e:
-            errors.append(f"Claude: {e}")
+        except Exception:
+            pass
+    return translate_free(text, target)
+
+
+def translate_free(text: str, target="en") -> str:
+    """Google Translate, then MyMemory (both free, no key). Cannot fix OCR mistakes."""
+    errors = []
     try:
         from deep_translator import GoogleTranslator
         g = GoogleTranslator(source="kn", target=target)

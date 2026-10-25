@@ -304,8 +304,12 @@ CROP_BELOW = 88   # pages already read this well don't need the crop-and-reread 
 
 
 def process_page(img: Image.Image, use_preprocess: bool = True,
-                 allow_vision: bool = True, force_vision: bool = False) -> PageResult:
+                 allow_vision: bool = True, force_vision: bool = False,
+                 on_step=None) -> PageResult:
+    """on_step(text) is called with short progress messages (used by the app's live panel)."""
+    step = on_step or (lambda msg: None)
     if force_vision and vision_available():
+        step("Asking the AI reader to transcribe the page")
         res = run_vision(img)
         res.preprocessed = preprocess(img, use_preprocess)
         return res
@@ -316,7 +320,9 @@ def process_page(img: Image.Image, use_preprocess: bool = True,
     else:
         # Pass 1: try several cleaned-up versions of the whole image
         tried = []
+        step("Cleaning up the image")
         for name, cand in candidate_images(img):
+            step(f"Reading Kannada text (cleanup: {name})")
             r = run_tesseract(cand)
             r.preprocessed, r.variant = cand, name
             tried.append(r)
@@ -326,6 +332,7 @@ def process_page(img: Image.Image, use_preprocess: bool = True,
 
         # Pass 2 (hard photos): crop to where the text is, throw the rest away, re-read
         if res.avg_conf < CROP_BELOW:
+            step("Hard page: finding the text area and reading it again")
             for r in sorted(tried, key=lambda r: r.score, reverse=True)[:3]:
                 crop = locate_text_crop(r.preprocessed, r.boxes)
                 if crop is None:
@@ -337,6 +344,7 @@ def process_page(img: Image.Image, use_preprocess: bool = True,
 
     if allow_vision and vision_available() and res.avg_conf < FALLBACK_BELOW:
         try:
+            step("Low confidence: asking the AI reader for a second opinion")
             v = run_vision(img)
             if v.text:
                 v.preprocessed, v.variant = res.preprocessed, "vision"
