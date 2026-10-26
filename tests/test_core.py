@@ -225,3 +225,45 @@ def test_word_export_has_english_and_table():
     d = Document(io.BytesIO(exports.to_docx("T", KANNADA, "Meaning", [("ಕ", "k")])))
     heads = [p.text for p in d.paragraphs if p.style.name.startswith("Heading")]
     assert heads == ["T", "English meaning", "Kannada text", "Line by line"] and len(d.tables) == 1
+
+
+# ------------------------------------------------------ backend additions
+def test_backup_restore_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "a.db"); storage.init_db()
+    storage.add_document("notice", KANNADA, "tesseract", 95, 1, "Exam in November")
+    blob = storage.export_json()
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "b.db"); storage.init_db()
+    assert storage.import_json(blob) == (1, 0)
+    assert len(storage.search("exam")) == 1 and len(storage.search("ಪರೀಕ್ಷೆ")) == 1
+    assert storage.import_json(blob) == (0, 1)                      # nothing is duplicated
+
+
+@pytest.mark.parametrize("bad", [b"not json", b'{"app": "other", "documents": []}',
+                                 b'{"app": "kannada-digitizer", "documents": "x"}'])
+def test_restore_rejects_files_that_are_not_backups(tmp_path, monkeypatch, bad):
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "c.db"); storage.init_db()
+    with pytest.raises(ValueError):
+        storage.import_json(bad)
+
+
+def test_database_uses_wal_for_concurrent_visitors(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "w.db"); storage.init_db()
+    assert storage._conn().execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_download_names_are_safe_but_keep_kannada():
+    assert exports.safe_filename("../../etc/passwd") == "etc_passwd"
+    assert exports.safe_filename("a/b\\c:d*?") == "a_b_c_d"
+    assert exports.safe_filename("ಪರೀಕ್ಷೆ ಸೂಚನೆ") == "ಪರೀಕ್ಷೆ ಸೂಚನೆ"
+    assert exports.safe_filename("") == "document" and len(exports.safe_filename("x" * 300)) <= 60
+
+
+@needs_tesseract
+def test_repeat_reads_are_served_from_memory():
+    ocr._READ_CACHE.clear()
+    data = (ROOT / "samples" / "notice_tilted.png").read_bytes()
+    _, r1, hit1 = ocr.read_document(data, "n.png", True, False)
+    _, r2, hit2 = ocr.read_document(data, "n.png", True, False)
+    assert (hit1, hit2) == (False, True) and r1[0].text == r2[0].text
+    _, _, hit3 = ocr.read_document(data, "n.png", False, False)       # other options: read afresh
+    assert hit3 is False

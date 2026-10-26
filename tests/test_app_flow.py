@@ -30,7 +30,7 @@ def new_app():
 
 def read_sample(at):
     [b for b in at.button if b.key == "s_notice_tilted.png"][0].click(); at.run()
-    [b for b in at.button if "Digitize" in b.label][0].click(); at.run()
+    [b for b in at.button if b.label == "Convert to text"][0].click(); at.run()
 
 
 def in_workspace(at):
@@ -59,7 +59,7 @@ def test_camera_is_an_equal_choice():
 
 def test_menu_pages_open_without_errors():
     at = new_app()
-    for page in ("Library & Search", "About"):
+    for page in ("My Library", "About"):
         at.sidebar.radio[0].set_value(page).run()
         assert not at.exception and at.session_state["page"] == page
 
@@ -67,4 +67,11 @@ def test_menu_pages_open_without_errors():
 def test_new_page_returns_to_the_start():
     at = new_app(); read_sample(at)
     [b for b in at.button if b.label == "New page"][0].click(); at.run()
-    assert not at.exception and any("Digitize" in b.label for b in at.button)
+    assert not at.exception and any(b.label == "Convert to text" for b in at.button)
+
+
+def test_library_page_offers_backup_and_restore():
+    at = new_app()
+    at.sidebar.radio[0].set_value("My Library").run()
+    assert not at.exception
+    assert any("Back up" in e.label for e in at.expander)

@@ -11,9 +11,11 @@ which models this key can use, try the best ones in order, and remember what wor
 """
 import base64
 import io
+import logging
 import os
 import re
 
+log = logging.getLogger("kannada.llm")
 ANTHROPIC_MODEL = os.getenv("TEXT_MODEL", "claude-sonnet-5-5")
 
 # Aliases that Google keeps pointing at the newest model, then plain fallbacks.
@@ -174,11 +176,14 @@ def _gemini(prompt, image):
     for model in _candidates(client):
         try:
             text = client.models.generate_content(model=model, contents=contents).text or ""
+            if _state["good"] != model:
+                log.info("Gemini model in use: %s", model)
             _state["good"] = model
             return text
         except Exception as e:
             last = e
             tried.append(model)
+            log.warning("Gemini model %s failed: %s (code %s)", model, _clean(e)[:160], _code(e))
             if _state["good"] == model:
                 _state["good"] = None
             kind = _kind(e)

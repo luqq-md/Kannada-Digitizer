@@ -3,6 +3,7 @@
 FTS5 'trigram' tokenizer: matches any 3+ character substring (good for Kannada,
 case-insensitive for English). Shorter queries fall back to a plain LIKE search.
 """
+import json
 import sqlite3
 from pathlib import Path
 
@@ -10,8 +11,14 @@ DB_PATH = Path(__file__).parent / "documents.db"
 
 
 def _conn():
-    c = sqlite3.connect(DB_PATH)
+    """One short-lived connection per call. A timeout and WAL mode let several visitors
+    read and write at the same time without 'database is locked' errors."""
+    c = sqlite3.connect(DB_PATH, timeout=15)
     c.row_factory = sqlite3.Row
+    try:
+        c.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.DatabaseError:
+        pass
     return c
 
 
@@ -129,3 +136,43 @@ def search(query: str):
             snip, lang = (r["text"] or "")[:120], "title"
         hits.append({"id": r["id"], "title": r["title"], "snippet": snip, "matched": lang})
     return hits
+
+
+# ------------------------------------------------------------ backup / restore
+BACKUP_VERSION = 1
+
+
+def export_json() -> bytes:
+    """Everything in the library as one JSON file (free hosting forgets files on restart)."""
+    with _conn() as c:
+        rows = c.execute("SELECT title,text,translation,engine,avg_conf,pages,created "
+                         "FROM documents ORDER BY id").fetchall()
+    payload = {"app": "kannada-digitizer", "version": BACKUP_VERSION,
+               "documents": [dict(r) for r in rows]}
+    return json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8")
+
+
+def import_json(data: bytes) -> tuple:
+    """Restore a backup. Returns (added, skipped). Documents already present are skipped.
+    Raises ValueError with a plain message if the file is not a backup from this app."""
+    try:
+        payload = json.loads(data.decode("utf-8"))
+        docs = payload["documents"]
+        if payload.get("app") != "kannada-digitizer" or not isinstance(docs, list):
+            raise KeyError
+    except Exception as e:
+        raise ValueError("That file is not a Kannada Digitizer backup.") from e
+    with _conn() as c:
+        have = {(r["title"], r["text"]) for r in c.execute("SELECT title,text FROM documents")}
+    added = skipped = 0
+    for d in docs:
+        title, text = str(d.get("title", "")), str(d.get("text", ""))
+        if not text.strip() or (title, text) in have:
+            skipped += 1
+            continue
+        add_document(title or "restored", text, str(d.get("engine", "restored")),
+                     float(d.get("avg_conf") or 0), int(d.get("pages") or 1),
+                     str(d.get("translation") or ""))
+        have.add((title, text))
+        added += 1
+    return added, skipped

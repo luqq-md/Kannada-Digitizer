@@ -202,7 +202,21 @@ hr{border-color:var(--soap2);}
 [data-testid="stToolbarActions"],[data-testid="stMainMenu"],[data-testid="stAppDeployButton"],
 [data-testid="stDecoration"],[data-testid="stStatusWidget"]{display:none!important;}
 /* NOTE: the toolbar itself must stay: it holds the button that re-opens the sidebar. */
-@media (min-width:992px){[data-testid="stSidebarCollapseButton"]{display:none!important;}}   /* keep the menu always visible on wide screens */
+/* sidebar hide / show: always visible and clearly labelled (Streamlit only shows the hide arrow on hover) */
+[data-testid="stSidebarCollapseButton"],[data-testid="stSidebarCollapseButton"] button{visibility:visible!important;opacity:1!important;}
+[data-testid="stSidebarCollapseButton"] button{background:rgba(255,255,255,.14)!important;border-radius:8px!important;
+  width:2.3rem!important;height:2.3rem!important;transition:background .15s;}
+[data-testid="stSidebarCollapseButton"] button:hover{background:var(--turmeric)!important;}
+[data-testid="stSidebarCollapseButton"] button *{color:#fff!important;fill:#fff!important;}
+[data-testid="stSidebarCollapseButton"] button:hover *{color:var(--ink)!important;fill:var(--ink)!important;}
+[data-testid="stExpandSidebarButton"]{visibility:visible!important;opacity:1!important;background:var(--ink)!important;
+  border-radius:8px!important;padding:.35rem .85rem .35rem .55rem!important;width:auto!important;height:auto!important;
+  display:inline-flex!important;align-items:center;gap:.4rem;box-shadow:0 8px 16px -8px rgba(19,32,27,.7);}
+[data-testid="stExpandSidebarButton"] *{color:#fff!important;fill:#fff!important;}
+[data-testid="stExpandSidebarButton"]::after{content:"Menu";color:#fff;font:700 .95rem var(--body);}
+[data-testid="stExpandSidebarButton"]:hover{background:var(--kumkuma)!important;}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"],[data-testid="stSidebar"] [data-testid="stCaptionContainer"] *,
+[data-testid="stSidebar"] [data-testid="stRadioOption"] small{color:#9FB0A6!important;font-size:.8rem!important;}
 .st-key-mobilenav{display:none;}
 @media (max-width:991px){.st-key-mobilenav{display:block;margin:.9rem 0 1.2rem;}}
 /* camera mode: the picker is really a camera button, so say so and drop the drag-and-drop hint */

@@ -4,6 +4,7 @@ Run:  streamlit run app.py
 
 Two states:  start (pick a page)  ->  workspace (read it, in English and Kannada).
 """
+import logging
 from pathlib import Path
 
 import streamlit as st
@@ -16,15 +17,19 @@ import ocr_pipeline as ocr
 import storage
 import theme
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+log = logging.getLogger("kannada.app")
+
 st.set_page_config(page_title="Kannada Digitizer · ಕನ್ನಡ ಡಿಜಿಟೈಸರ್", page_icon="📜", layout="wide")
 storage.init_db()
 theme.inject()
 
 # ------------------------------------------------------------------ navigation
-PAGES = ["Digitize", "Library & Search", "About"]
+PAGES = ["Photo to Text", "My Library", "About"]
+PAGE_HINTS = ["Turn a page into text", "Your saved pages", "Why and how it works"]
 ss = st.session_state
 if "page" not in ss:
-    ss.page = "Digitize"
+    ss.page = "Photo to Text"
 ss.setdefault("nav_side", ss.page)
 ss.setdefault("nav_top", ss.page)
 
@@ -39,7 +44,7 @@ def _go(src):
 
 theme.sidebar_brand()
 st.sidebar.radio("Go to", PAGES, key="nav_side", on_change=_go, args=("nav_side",),
-                 label_visibility="collapsed")
+                 captions=PAGE_HINTS, label_visibility="collapsed")
 st.sidebar.divider()
 theme.sidebar_status(llm.label() if llm.available() else None)
 if hasattr(st, "segmented_control"):
@@ -169,58 +174,62 @@ def start_page():
                     ss.sample = fname
                     st.rerun()
 
-    ai_on = ocr.vision_available()
-    c1, c2, c3 = st.columns(3)
-    use_pre = c1.checkbox("Clean the image first", True,
-                          help="Straightens the page, flips light-on-dark text, removes glare.")
-    allow_v = c2.checkbox("Let the AI reader help on hard pages", True, disabled=not ai_on,
-                          help="" if ai_on else NEEDS_KEY)
-    force_v = c3.checkbox("Handwriting mode (AI reader always)", False, disabled=not ai_on,
-                          help="" if ai_on else NEEDS_KEY)
-
     ready = bool(files or photo is not None or ss.get("sample"))
     photo_id = None
     if photo is not None:
         photo_id = getattr(photo, "file_id", None) or (photo.name, photo.size)
     auto = photo is not None and ss.get("auto_done") != photo_id    # a fresh photo is read at once
-    pressed = st.button("Digitize this page", type="primary", disabled=not ready)
-    if not (pressed or auto):
+
+    convert_box = st.container()
+    options_box = st.expander("Reading options")
+    ai_on = ocr.vision_available()
+    with options_box:
+        c1, c2, c3 = st.columns(3)
+        use_pre = c1.checkbox("Clean the image first", True,
+                              help="Straightens the page, flips light-on-dark text, removes glare.")
+        allow_v = c2.checkbox("Let the AI reader help on hard pages", True, disabled=not ai_on,
+                              help="" if ai_on else NEEDS_KEY)
+        force_v = c3.checkbox("Handwriting mode (AI reader always)", False, disabled=not ai_on,
+                              help="" if ai_on else NEEDS_KEY)
+    with convert_box:
+        pressed = st.button("Convert to text", type="primary", disabled=not ready)
         if not ready:
-            st.info("Choose a file, take a photo, or pick a sample. A clear, well-lit photo works best.")
+            st.caption("Choose a file, take a photo, or pick a sample first. "
+                       "A clear, well-lit photo works best.")
+    if not (pressed or auto):
         return
     if auto:
         ss.auto_done = photo_id
 
     # ---- read the page(s)
-    images, names = [], []
-    try:
-        for f in (files or []):
-            for im in ocr.load_pages(f.getvalue(), f.name):
-                images.append(im)
-                names.append(f.name)
-        if photo is not None:
-            images.extend(ocr.load_pages(photo.getvalue(), photo.name or "camera.jpg"))
-            names.append("camera photo")
-        if not images and ss.get("sample"):
-            sp = SAMPLE_DIR / ss.sample
-            images.extend(ocr.load_pages(sp.read_bytes(), sp.name))
-            names.append(sp.name)
-    except ocr.UnreadableFile as e:
-        st.error(str(e))
-        return
+    sources = [(f.getvalue(), f.name, f.name) for f in (files or [])]
+    if photo is not None:
+        sources.append((photo.getvalue(), photo.name or "camera.jpg", "camera photo"))
+    if not sources and ss.get("sample"):
+        sp = SAMPLE_DIR / ss.sample
+        sources.append((sp.read_bytes(), sp.name, sp.name))
 
-    results = []
+    images, results, names = [], [], []
     with st.status("Reading your page…", expanded=True) as status:
-        for i, im in enumerate(images):
-            if len(images) > 1:
-                st.write(f"**Page {i + 1} of {len(images)}**")
-            try:
-                results.append(ocr.process_page(im, use_pre, allow_v, force_v, on_step=st.write))
-            except Exception:
-                status.update(label="Could not read this page", state="error")
-                st.error("This page could not be read. Try a clearer, well-lit photo "
-                         "with the page filling the frame.")
-                return
+        try:
+            for data, fname, label in sources:
+                im, rs, hit = ocr.read_document(data, fname, use_pre, allow_v, force_v,
+                                                on_step=st.write)
+                if hit:
+                    st.write("Read this page before, so it is ready instantly")
+                images += im
+                results += rs
+                names.append(label)
+        except ocr.UnreadableFile as e:
+            status.update(label="Could not open the file", state="error")
+            st.error(str(e))
+            return
+        except Exception:
+            log.exception("reading failed")
+            status.update(label="Could not read this page", state="error")
+            st.error("This page could not be read. Try a clearer, well-lit photo "
+                     "with the page filling the frame.")
+            return
         text = "\n\n".join(r.text for r in results)
         st.write("Translating so it reads in English")
         und = safe_understand(text)
@@ -228,7 +237,7 @@ def start_page():
 
     reset_work()
     ss.images, ss.results = images, results
-    ss.title = names[0].rsplit(".", 1)[0] if names else "document"
+    ss.title = exports.safe_filename(names[0].rsplit(".", 1)[0]) if names else "document"
     ss.text, ss.und, ss.und_text = text, und, text
     ss.saved_id = None
     ss.flash = "Page read. You can read it in English, side by side, or in Kannada."
@@ -271,17 +280,17 @@ def workspace_page():
         st.download_button("Word document (.docx)",
                            exports.to_docx(ss.title, ss.text, u["english"] if u else "",
                                            u["lines"] if u else None),
-                           f"{ss.title}.docx", width="stretch")
-        st.download_button("Kannada text (.txt)", exports.to_txt(ss.text), f"{ss.title}-kannada.txt",
+                           f"{exports.safe_filename(ss.title)}.docx", width="stretch")
+        st.download_button("Kannada text (.txt)", exports.to_txt(ss.text), f"{exports.safe_filename(ss.title)}-kannada.txt",
                            width="stretch")
         if u:
             st.download_button("English text (.txt)", exports.to_txt(u["english"]),
-                               f"{ss.title}-english.txt", width="stretch")
+                               f"{exports.safe_filename(ss.title)}-english.txt", width="stretch")
         if st.button("Prepare searchable PDF", width="stretch"):
             with st.spinner("Building the PDF…"):
                 ss.pdf = exports.to_searchable_pdf(images)
         if ss.get("pdf"):
-            st.download_button("Searchable PDF", ss.pdf, f"{ss.title}.pdf", width="stretch")
+            st.download_button("Searchable PDF", ss.pdf, f"{exports.safe_filename(ss.title)}.pdf", width="stretch")
     if b5.button("New page", width="stretch"):
         reset_work()
         st.rerun()
@@ -414,9 +423,22 @@ def library_page():
             with st.container(border=True):
                 st.markdown(f"**{h['title']}**  matched in {h['matched']}")
                 st.write(h["snippet"])
+    with st.expander("Back up or restore your library"):
+        st.caption("Free hosting forgets saved pages when the app restarts. "
+                   "Download a backup now and then, and restore it here any time.")
+        st.download_button("Download backup", storage.export_json(), "kannada-library-backup.json",
+                           mime="application/json")
+        up = st.file_uploader("Restore from a backup file", type=["json"], key="restore")
+        if up is not None and st.button("Restore these documents"):
+            try:
+                added, skipped = storage.import_json(up.getvalue())
+                st.toast(f"Restored {added} document(s); {skipped} already there.", icon="📚")
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
     docs = storage.list_documents()
     if not docs:
-        st.info("Nothing saved yet. Digitize a page and press Save. "
+        st.info("Nothing saved yet. Convert a page and press Save. "
                 "It will appear here, searchable in Kannada and English.")
     for d in docs:
         with st.expander(f"{d['title']}: {d['pages']} page(s), {d['avg_conf']:.0f}% confidence, "
@@ -481,4 +503,4 @@ digraph G {
         "Handwriting depends on the AI reader.")
 
 
-{"Digitize": digitize_page, "Library & Search": library_page, "About": about_page}[page]()
+{"Photo to Text": digitize_page, "My Library": library_page, "About": about_page}[page]()

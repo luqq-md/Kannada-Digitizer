@@ -5,8 +5,12 @@ Flow:  load image/PDF  ->  preprocess (OpenCV)  ->  Tesseract (kan)
        -> clean up text + mark uncertain words
 """
 import base64
+import hashlib
 import io
+import logging
 import os
+import threading
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,9 +18,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytesseract
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image, ImageOps
+
+log = logging.getLogger("kannada.ocr")
 
 # Use the Kannada model that ships inside this project folder
 TESSDATA_DIR = str(Path(__file__).parent / "tessdata")
@@ -396,6 +403,48 @@ def process_page(img: Image.Image, use_preprocess: bool = True,
         except Exception as e:           # keep Tesseract result if API fails
             print("Vision fallback failed:", e)
     return res
+
+
+# ------------------------------------------------------------- read + cache
+_READ_CACHE: "OrderedDict" = OrderedDict()
+_READ_LOCK = threading.Lock()
+READ_CACHE_MAX = 10          # a few recent documents; keeps demos instant and memory small
+
+
+def read_document(data: bytes, filename: str, use_preprocess=True, allow_vision=True,
+                  force_vision=False, on_step=None):
+    """Open a file and read every page. Returns (images, results, from_cache).
+
+    The same file read with the same options is served from memory, so repeating a demo
+    (or a judge clicking the same sample) is instant and uses no AI quota. Treat the
+    returned objects as read-only: they are shared between visitors.
+    """
+    ai = vision_available()
+    key = (hashlib.sha1(data).hexdigest(), bool(use_preprocess),
+           bool(allow_vision and ai), bool(force_vision and ai))
+    with _READ_LOCK:
+        if key in _READ_CACHE:
+            _READ_CACHE.move_to_end(key)
+            images, results = _READ_CACHE[key]
+            return images, results, True
+
+    t0 = time.time()
+    images = load_pages(data, filename)
+    results = []
+    for i, im in enumerate(images):
+        if on_step and len(images) > 1:
+            on_step(f"Page {i + 1} of {len(images)}")
+        results.append(process_page(im, use_preprocess, allow_vision, force_vision, on_step=on_step))
+    log.info("read %s: %d page(s), variant=%s, confidence=%.0f, %.1fs", filename, len(images),
+             results[0].variant if results else "-",
+             sum(r.avg_conf for r in results) / max(1, len(results)), time.time() - t0)
+
+    if len(images) <= 3:
+        with _READ_LOCK:
+            _READ_CACHE[key] = (images, results)
+            while len(_READ_CACHE) > READ_CACHE_MAX:
+                _READ_CACHE.popitem(last=False)
+    return images, results, False
 
 
 def highlight_html(words: list) -> str:

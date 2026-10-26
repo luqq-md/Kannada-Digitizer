@@ -1,5 +1,7 @@
 """Export helpers: TXT, DOCX and searchable PDF."""
 import io
+import re
+import unicodedata
 
 import pytesseract
 from docx import Document
@@ -62,3 +64,12 @@ def to_searchable_pdf(images: list) -> bytes:
     buf = io.BytesIO()
     writer.write(buf)
     return buf.getvalue()
+
+
+def safe_filename(title: str, fallback: str = "document") -> str:
+    """A name that is safe to offer as a download: no slashes or odd symbols, but every
+    letter, vowel sign and digit in any script (Kannada included) is kept."""
+    keep = "".join(ch if (unicodedata.category(ch)[0] in "LMN" or ch in "-_. ") else "_"
+                   for ch in (title or "").strip())
+    name = re.sub(r"_+", "_", re.sub(r"\s+", " ", keep)).strip(" ._")[:60]
+    return name or fallback
