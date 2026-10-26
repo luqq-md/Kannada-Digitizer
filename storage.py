@@ -3,6 +3,8 @@
 FTS5 'trigram' tokenizer: matches any 3+ character substring (good for Kannada,
 case-insensitive for English). Shorter queries fall back to a plain LIKE search.
 """
+MODULE_VERSION = 6   # bumped on every release; app.py checks it to spot half-uploaded updates
+
 import json
 import sqlite3
 from pathlib import Path

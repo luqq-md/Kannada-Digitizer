@@ -3,6 +3,8 @@
 Translation and read-aloud work WITHOUT any API key (free Google services).
 Summary, Q&A and meaning-aware translation need an AI key (free Gemini or Claude).
 """
+MODULE_VERSION = 6   # bumped on every release; app.py checks it to spot half-uploaded updates
+
 import hashlib
 import io
 import json

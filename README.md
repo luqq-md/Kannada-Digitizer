@@ -5,6 +5,7 @@ then translate it, summarize it, listen to it, and ask questions about it.
 Built for the Kannada Digital Innovation Hackathon 2026 (Problem 5: Kannada Text Digitization).
 
 ## Features
+- **Scan and go:** take a photo (the phone's back camera) or upload a page and it is read the moment it arrives, with no button to press. One tap on a sample page too
 - Upload images, scanned PDFs or camera photos (phone rotation is fixed automatically)
 - OpenCV clean-up: upscale, denoise, straighten, flip white-on-dark text, remove glare
 - Kannada OCR with Tesseract; several clean-ups are tried **in parallel** and the best is kept
@@ -83,3 +84,9 @@ pytest
 19 automated checks cover search and the database upgrade, AI reply parsing and every fallback,
 model fallback and key masking, safe file loading, reading the sample pages, and the Word export.
 They need no internet and no API key.
+
+## If something does not work on the live site
+Open **About, then System check**. It tests the server (Tesseract, the Kannada model, PDF support,
+the database, the AI helper, and a real sample read) and shows the real reason for any failure.
+If you upload a new version and forget one file, the app starts with a message naming the file that
+is out of date, instead of failing in a confusing way. Server logs: Streamlit **Manage app, Logs**.

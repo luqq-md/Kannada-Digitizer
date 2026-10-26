@@ -1,4 +1,6 @@
 """Export helpers: TXT, DOCX and searchable PDF."""
+MODULE_VERSION = 6   # bumped on every release; app.py checks it to spot half-uploaded updates
+
 import io
 import re
 import unicodedata

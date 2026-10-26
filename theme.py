@@ -12,6 +12,8 @@ Palette (all taken from the subject):
   turmeric   #E8A317  accent        (flag yellow)
   kumkuma    #A31F1A  actions       (flag red)
 """
+MODULE_VERSION = 6   # bumped on every release; app.py checks it to spot half-uploaded updates
+
 import html
 
 import streamlit as st
@@ -78,19 +80,19 @@ p,li,label,span{font-family:var(--body);}
 .dot.on{background:var(--turmeric);box-shadow:0 0 0 4px rgba(232,163,23,.2);}
 
 /* ---------- hero ---------- */
-.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:2.6rem;align-items:center;
-  padding:.4rem 0 2.2rem;border-bottom:1px solid var(--soap2);margin-bottom:1.6rem;}
-.stApp .hero-title{font:800 clamp(2.1rem,4.6vw,3.5rem)/1.04 var(--display);letter-spacing:-.035em;margin:0 0 1rem;color:var(--ink);}
-.stApp .hero-sub{font-size:1.1rem;line-height:1.6;color:var(--ink2);max-width:34rem;margin:0;}
-.leaf{position:relative;height:150px;border-radius:12px;overflow:hidden;
+.hero{display:grid;grid-template-columns:1.25fr .75fr;gap:1.8rem;align-items:center;
+  padding:0 0 1.1rem;border-bottom:1px solid var(--soap2);margin-bottom:1.1rem;}
+.stApp .hero-title{font:800 clamp(1.8rem,3.4vw,2.6rem)/1.06 var(--display);letter-spacing:-.03em;margin:0 0 .55rem;color:var(--ink);}
+.stApp .hero-sub{font-size:1rem;line-height:1.55;color:var(--ink2);max-width:34rem;margin:0;}
+.leaf{position:relative;height:104px;border-radius:12px;overflow:hidden;
   background:
    repeating-linear-gradient(to bottom,rgba(110,90,30,.09) 0 1px,transparent 1px 7px),
    linear-gradient(180deg,#E0D8A6,var(--leaf) 55%,#C9BF86);
   box-shadow:inset 0 0 0 1px var(--leaf2),0 18px 30px -18px rgba(19,32,27,.45);}
-.leaf-hole{position:absolute;left:22px;top:50%;width:16px;height:16px;margin-top:-8px;border-radius:50%;
+.leaf-hole{position:absolute;left:18px;top:50%;width:14px;height:14px;margin-top:-7px;border-radius:50%;
   background:var(--soap);box-shadow:inset 0 2px 3px rgba(0,0,0,.35);}
 .leaf-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  padding-left:44px;font:700 clamp(2rem,4.2vw,3.1rem)/1 var(--manu);white-space:nowrap;}
+  padding-left:40px;font:700 clamp(1.4rem,2.8vw,2.1rem)/1 var(--manu);white-space:nowrap;}
 .leaf-text.rough{color:#8A7A48;opacity:.55;filter:blur(1.6px);transform:rotate(-1.6deg) skewX(-3deg);
   clip-path:inset(0 0 0 0);animation:wornout 3.4s .7s cubic-bezier(.6,0,.3,1) forwards;}
 .leaf-text.crisp{color:var(--leafink);clip-path:inset(0 100% 0 0);animation:reveal 3.4s .7s cubic-bezier(.6,0,.3,1) forwards;}
@@ -101,7 +103,8 @@ p,li,label,span{font-family:var(--body);}
 @keyframes sweep{0%{left:0;opacity:1}92%{opacity:1}100%{left:calc(100% - 3px);opacity:0}}
 @media (prefers-reduced-motion:reduce){
   .leaf-text.crisp{animation:none;clip-path:none;}.leaf-text.rough{display:none;}.beam{display:none;}}
-@media (max-width:860px){.hero{grid-template-columns:1fr;gap:1.6rem;}}
+@media (max-width:860px){.hero{grid-template-columns:1fr;gap:1rem;}}
+@media (max-width:700px){.leaf{display:none;}.hero{padding-bottom:.5rem;margin-bottom:.6rem;}}
 
 /* ---------- step rail ---------- */
 .rail{display:flex;gap:0;margin:0 0 1.8rem;}
@@ -166,7 +169,7 @@ mark{background:#F2C94C;color:var(--ink);padding:0 3px;border-radius:3px;}
 
 /* ---------- tabs, expanders, alerts ---------- */
 [data-baseweb="tab-list"]{gap:1.4rem;border-bottom:1px solid var(--soap2);}
-button[data-baseweb="tab"]{padding:.6rem 0;font-weight:600;font-family:var(--body);background:transparent;}
+[role="tab"]{padding:.6rem 0;font-weight:600;font-family:var(--body);background:transparent;}
 [data-baseweb="tab-highlight"]{background:var(--kumkuma)!important;height:3px!important;}
 [data-testid="stExpander"]{border:1px solid var(--soap2);border-left:4px solid var(--turmeric);border-radius:4px;background:rgba(255,255,255,.35);}
 [data-testid="stAlert"] *{color:var(--ink)!important;}
@@ -219,6 +222,13 @@ hr{border-color:var(--soap2);}
 [data-testid="stSidebar"] [data-testid="stRadioOption"] small{color:#9FB0A6!important;font-size:.8rem!important;}
 .st-key-mobilenav{display:none;}
 @media (max-width:991px){.st-key-mobilenav{display:block;margin:.9rem 0 1.2rem;}}
+/* the Upload / Take a photo choice: large and obvious */
+.st-key-source [data-testid="stButtonGroup"] button,.st-key-source button{min-height:3.1rem!important;font-size:1.05rem!important;
+  padding:.4rem 1.7rem!important;}
+/* the one-tap sample */
+.st-key-samplecard{background:linear-gradient(180deg,#EFEBC8,#E4DDAE);border:1px solid var(--leaf2);border-radius:12px;
+  padding:1.1rem 1.3rem;margin:1.1rem 0 .8rem;}
+.st-key-samplecard [data-testid="stImage"] img{border-width:5px;}
 /* camera mode: the picker is really a camera button, so say so and drop the drag-and-drop hint */
 .st-key-camwrap [data-testid="stFileUploaderDropzone"]{justify-content:center;text-align:center;}
 .st-key-camwrap [data-testid="stFileUploaderDropzoneInstructions"]{display:none!important;}
@@ -249,9 +259,9 @@ hr{border-color:var(--soap2);}
 .stApp [data-testid="stCheckbox"] label:has(input:disabled){opacity:.5;}
 
 /* ---- tabs ---- */
-.stApp [data-testid="stMain"] button[data-baseweb="tab"] *{color:var(--ink2)!important;font-weight:600;}
-.stApp [data-testid="stMain"] button[data-baseweb="tab"][aria-selected="true"] *{color:var(--ink)!important;font-weight:700;}
-.stApp [data-testid="stMain"] button[data-baseweb="tab"]:hover *{color:var(--kumkuma)!important;}
+.stApp [data-testid="stMain"] [role="tab"] *{color:var(--ink2)!important;font-weight:600;}
+.stApp [data-testid="stMain"] [role="tab"][aria-selected="true"] *{color:var(--ink)!important;font-weight:700;}
+.stApp [data-testid="stMain"] [role="tab"]:hover *{color:var(--kumkuma)!important;}
 
 /* ---- inputs ---- */
 .stApp [data-baseweb="input"]{background:#fff!important;border:1.5px solid var(--silver)!important;border-radius:6px!important;}
@@ -376,8 +386,7 @@ def hero() -> None:
       <section class="hero">
         <div>
           <h1 class="hero-title">Kannada on paper,<br>now searchable.</h1>
-          <p class="hero-sub">Upload a photo, scan or PDF. Get clean text you can edit,
-          search, translate and listen to.</p>
+          <p class="hero-sub">Take a photo or upload a page. It is read the moment it arrives, and you get the English beside the Kannada.</p>
         </div>
         <div class="leaf" role="img" aria-label="A palm-leaf strip turning into clear digital text">
           <div class="leaf-hole"></div>

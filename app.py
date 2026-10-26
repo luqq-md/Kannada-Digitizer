@@ -10,17 +10,40 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
-import ai_tools
-import exports
-import llm
-import ocr_pipeline as ocr
-import storage
-import theme
+st.set_page_config(page_title="Kannada Digitizer · ಕನ್ನಡ ಡಿಜಿಟೈಸರ್", page_icon="📜", layout="wide")
+
+# ---- start-up guard: a half-uploaded update (new app.py + old helper file) is named, not mysterious
+APP_VERSION = 6
+REQUIRED = {"ocr_pipeline": APP_VERSION, "ai_tools": APP_VERSION, "llm": APP_VERSION,
+            "storage": APP_VERSION, "exports": APP_VERSION, "theme": APP_VERSION}
+try:
+    import diagnostics
+    _stale = (diagnostics.stale_modules(REQUIRED)
+              if getattr(diagnostics, "MODULE_VERSION", 0) == APP_VERSION
+              else [("diagnostics.py", getattr(diagnostics, "MODULE_VERSION", 0), APP_VERSION)])
+except ImportError:
+    diagnostics = None
+    _stale = [("diagnostics.py", None, APP_VERSION)]
+if _stale:
+    lines = "\n".join(f"- **{f}**: " + ("not on the server" if found is None else
+                      f"the server has version {found}, this app needs {need}")
+                      for f, found, need in _stale)
+    st.error("Some files on the server are out of date, so the app cannot start safely.")
+    st.markdown(f"{lines}\n\n**How to fix it:** open your GitHub repository, choose **Add file → "
+                "Upload files**, upload the newest copy of each file listed above, and commit. "
+                "Then in Streamlit open **Manage app → ⋮ → Reboot app**.")
+    st.stop()
+
+import ai_tools   # noqa: E402
+import exports    # noqa: E402
+import llm        # noqa: E402
+import ocr_pipeline as ocr   # noqa: E402
+import storage    # noqa: E402
+import theme      # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("kannada.app")
 
-st.set_page_config(page_title="Kannada Digitizer · ಕನ್ನಡ ಡಿಜಿಟೈಸರ್", page_icon="📜", layout="wide")
 storage.init_db()
 theme.inject()
 
@@ -55,9 +78,7 @@ page = ss.page
 
 SAMPLE_DIR = Path(__file__).parent / "samples"
 SOURCES = ["Upload a file", "Take a photo"]
-SAMPLES = [("Tilted notice", "notice_tilted.png"),
-           ("Noisy textbook page", "textbook_noisy.png"),
-           ("Phone-style photo, white on dark", "hard_letter_a.png")]
+SAMPLE_FILE = "notice_tilted.png"
 VIEWS = ["English", "Side by side", "Kannada"]
 NEEDS_KEY = "Add a free GEMINI_API_KEY in the app's Secrets to turn this on."
 WORK_KEYS = ("images", "results", "title", "text", "und", "und_text", "summary", "facts",
@@ -131,10 +152,9 @@ def reset_work():
 
 # ================================================================== START
 def start_page():
+    """Scan-and-go: the moment a file arrives or a photo is taken, it is read. No button to press."""
     theme.hero()
-    theme.steps(1)
 
-    theme.plate_title("Add your page")
     if "source" not in ss:
         ss.source = SOURCES[1] if is_phone() else SOURCES[0]       # phones start with the camera
     seg = getattr(st, "segmented_control", None)
@@ -152,38 +172,31 @@ def start_page():
         files = st.file_uploader("Drop a photo, scan or PDF here, or browse",
                                  type=["png", "jpg", "jpeg", "webp", "pdf"],
                                  accept_multiple_files=True, key=f"up{n}")
+        st.caption("It starts reading the moment your file arrives. Nothing else to press.")
     elif is_phone():
         with st.container(key="camwrap"):
-            photo = st.file_uploader("Tap below to open your camera and photograph the page",
+            photo = st.file_uploader("Tap to open your camera and photograph the page",
                                      type=["png", "jpg", "jpeg", "webp"], key=f"cam{n}")
         rear_camera_hint()
-        st.caption("This uses your phone's own camera, so the photo is sharp. "
-                   "Fill the frame with the page and hold steady. It reads automatically.")
+        st.caption("Uses your phone's own camera. Fill the frame with the page and hold steady. "
+                   "It reads the moment you take the photo.")
     else:
-        photo = st.camera_input("Take a photo of the page", key=f"webcam{n}")
+        photo = st.camera_input("Point the camera at the page and press Take photo", key=f"webcam{n}")
 
-    avail = [(l, f) for l, f in SAMPLES if (SAMPLE_DIR / f).exists()]
-    if avail and not files and photo is None:
-        st.markdown('<p class="try-label">No file handy? Try a sample.</p>', unsafe_allow_html=True)
-        for col, (label, fname) in zip(st.columns(len(avail)), avail):
-            with col:
-                st.image(str(SAMPLE_DIR / fname), width="stretch")
-                chosen = ss.get("sample") == fname
-                if st.button(("Selected: " if chosen else "") + label, key="s_" + fname,
-                             type="primary" if chosen else "secondary", width="stretch"):
-                    ss.sample = fname
-                    st.rerun()
+    # ---- one sample, one tap
+    sample_path = SAMPLE_DIR / SAMPLE_FILE
+    sample_go = False
+    if sample_path.exists() and not files and photo is None:
+        with st.container(key="samplecard"):
+            c1, c2 = st.columns([1, 2], vertical_alignment="center", gap="large")
+            c1.image(str(sample_path), width="stretch")
+            with c2:
+                st.markdown("**No page handy?**")
+                st.caption("Try a sample notice and watch it turn into English in a few seconds.")
+                sample_go = st.button("Try the sample page", key="s_sample", type="primary")
 
-    ready = bool(files or photo is not None or ss.get("sample"))
-    photo_id = None
-    if photo is not None:
-        photo_id = getattr(photo, "file_id", None) or (photo.name, photo.size)
-    auto = photo is not None and ss.get("auto_done") != photo_id    # a fresh photo is read at once
-
-    convert_box = st.container()
-    options_box = st.expander("Reading options")
     ai_on = ocr.vision_available()
-    with options_box:
+    with st.expander("Reading options"):
         c1, c2, c3 = st.columns(3)
         use_pre = c1.checkbox("Clean the image first", True,
                               help="Straightens the page, flips light-on-dark text, removes glare.")
@@ -191,23 +204,39 @@ def start_page():
                               help="" if ai_on else NEEDS_KEY)
         force_v = c3.checkbox("Handwriting mode (AI reader always)", False, disabled=not ai_on,
                               help="" if ai_on else NEEDS_KEY)
-    with convert_box:
-        pressed = st.button("Convert to text", type="primary", disabled=not ready)
-        if not ready:
-            st.caption("Choose a file, take a photo, or pick a sample first. "
-                       "A clear, well-lit photo works best.")
-    if not (pressed or auto):
+
+    # ---- when to start: a new file, a new photo, the sample, or 'try again' after a failure
+    file_ids = (tuple(getattr(f, "file_id", None) or (f.name, f.size) for f in files)
+                if files else None)
+    photo_id = None
+    if photo is not None:
+        photo_id = getattr(photo, "file_id", None) or (photo.name, photo.size)
+    fresh_files = bool(files) and ss.get("done_files") != file_ids
+    fresh_photo = photo is not None and ss.get("done_photo") != photo_id
+    retry = False
+    if ss.get("read_error"):
+        msg, tech, can_retry = ss.read_error
+        st.error(msg)
+        if tech:
+            with st.expander("Technical details (send these if it keeps happening)"):
+                st.code(tech, language=None)
+                st.caption("Tip: About, then System check, tests this server and shows what is wrong.")
+        if can_retry:
+            retry = st.button("Try reading again", type="primary")
+    if not (fresh_files or fresh_photo or sample_go or retry):
         return
-    if auto:
-        ss.auto_done = photo_id
+    ss.pop("read_error", None)
+    if fresh_files:
+        ss.done_files = file_ids
+    if fresh_photo:
+        ss.done_photo = photo_id
 
     # ---- read the page(s)
     sources = [(f.getvalue(), f.name, f.name) for f in (files or [])]
     if photo is not None:
         sources.append((photo.getvalue(), photo.name or "camera.jpg", "camera photo"))
-    if not sources and ss.get("sample"):
-        sp = SAMPLE_DIR / ss.sample
-        sources.append((sp.read_bytes(), sp.name, sp.name))
+    if not sources and sample_go:
+        sources.append((sample_path.read_bytes(), sample_path.name, sample_path.name))
 
     images, results, names = [], [], []
     with st.status("Reading your page…", expanded=True) as status:
@@ -221,19 +250,21 @@ def start_page():
                 results += rs
                 names.append(label)
         except ocr.UnreadableFile as e:
-            status.update(label="Could not open the file", state="error")
-            st.error(str(e))
-            return
-        except Exception:
+            ss.read_error = (str(e), None, False)
+        except Exception as e:
             log.exception("reading failed")
+            ss.read_error = ("This page could not be read. Try a clearer, well-lit photo with the "
+                             "page filling the frame, or try again.",
+                             f"{type(e).__name__}: {str(e)[:400]}", True)
+        if not ss.get("read_error"):
+            text = "\n\n".join(r.text for r in results)
+            st.write("Translating so it reads in English")
+            und = safe_understand(text)
+            status.update(label="Ready", state="complete", expanded=False)
+        else:
             status.update(label="Could not read this page", state="error")
-            st.error("This page could not be read. Try a clearer, well-lit photo "
-                     "with the page filling the frame.")
-            return
-        text = "\n\n".join(r.text for r in results)
-        st.write("Translating so it reads in English")
-        und = safe_understand(text)
-        status.update(label="Ready", state="complete", expanded=False)
+    if ss.get("read_error"):
+        st.rerun()                      # redraw the start page with the message and the retry button
 
     reset_work()
     ss.images, ss.results = images, results
@@ -496,6 +527,16 @@ digraph G {
         ("The 6 hardest, phone-style photos (white text on dark, tilted, glare)",
          [("Plain Tesseract", 70.2, False), ("This pipeline", 0.3, True)]),
     ])
+    theme.plate_title("System check")
+    st.caption("If something does not work, press this. It tests this server and shows the real reason.")
+    if st.button("Run system check"):
+        with st.spinner("Checking…"):
+            ss.syscheck = diagnostics.run_checks(REQUIRED)
+    for name, ok, detail in ss.get("syscheck", []):
+        st.markdown(f"{'✅' if ok else '❌'} **{name}**: {detail}")
+    if llm.available() and st.button("Test the AI helper (uses a little quota)"):
+        ok, detail = diagnostics.test_ai()
+        st.markdown(f"{'✅' if ok else '❌'} **AI helper**: {detail}")
     st.markdown(
         "**Read this honestly.** The test images are synthetic: computer-made Kannada, then degraded "
         "to look like phone photos. Real photos are harder. On two real, low-resolution phone-screen "

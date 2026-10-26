@@ -4,6 +4,8 @@ Flow:  load image/PDF  ->  preprocess (OpenCV)  ->  Tesseract (kan)
        -> if confidence is low and an API key exists -> vision model fallback
        -> clean up text + mark uncertain words
 """
+MODULE_VERSION = 6   # bumped on every release; app.py checks it to spot half-uploaded updates
+
 import base64
 import hashlib
 import io
