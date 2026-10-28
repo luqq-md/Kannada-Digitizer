@@ -267,3 +267,39 @@ def test_repeat_reads_are_served_from_memory():
     assert (hit1, hit2) == (False, True) and r1[0].text == r2[0].text
     _, _, hit3 = ocr.read_document(data, "n.png", False, False)       # other options: read afresh
     assert hit3 is False
+
+
+# ------------------------------------------------------- start-up guard report
+def test_guard_report_spots_zip_files_and_extra_folders(tmp_path, monkeypatch):
+    import diagnostics
+    (tmp_path / "ocr_pipeline.py").write_text("x = 1\n")                    # old file: no version stamp
+    (tmp_path / "update-v7.zip").write_bytes(b"PK")
+    (tmp_path / "update-v7").mkdir()
+    monkeypatch.setattr(diagnostics, "HERE", tmp_path)
+    msg = diagnostics.explain([("ocr_pipeline.py", 0, 7)], {"ocr_pipeline": 7})
+    assert "OLD one" in msg and "update-v7.zip" in msg and "extra folder" in msg
+    assert "Upload the newest copy" in msg
+
+
+def test_guard_report_says_reboot_when_only_memory_is_old(tmp_path, monkeypatch):
+    import diagnostics
+    (tmp_path / "llm.py").write_text("MODULE_VERSION = 7\n")
+    monkeypatch.setattr(diagnostics, "HERE", tmp_path)
+    msg = diagnostics.explain([("llm.py", 0, 7)], {"llm": 7})
+    assert "Rebooting the app fixes this" in msg and "OLD one" not in msg
+
+
+# ---------------------------------------------------------------- AI reader honesty
+def test_ai_reader_saying_no_text_is_treated_as_empty(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setattr(llm, "complete", lambda *a, **k: "NO_TEXT")
+    r = ocr.run_vision(Image.new("RGB", (40, 40), "white"))
+    assert r.text == "" and r.engine == "vision"
+
+
+def test_ai_reader_prompt_asks_for_no_text_marker(monkeypatch):
+    seen = []
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setattr(llm, "complete", lambda p, *a, **k: seen.append(p) or "ಅ")
+    ocr.run_vision(Image.new("RGB", (40, 40), "white"))
+    assert "NO_TEXT" in seen[0]

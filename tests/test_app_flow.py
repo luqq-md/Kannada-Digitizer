@@ -94,13 +94,27 @@ def test_a_failed_read_explains_itself_and_offers_a_retry(monkeypatch):
     assert any(b.label == "Try reading again" for b in at.button)
 
 
-def test_half_uploaded_update_is_named_not_mysterious(monkeypatch):
-    import ocr_pipeline
-    monkeypatch.setattr(ocr_pipeline, "MODULE_VERSION", 1)                  # pretend the server has an old file
+def test_old_file_on_disk_is_named_not_mysterious(monkeypatch):
+    import diagnostics, ocr_pipeline
+    monkeypatch.setattr(ocr_pipeline, "MODULE_VERSION", 1)                  # old copy in memory
+    real = diagnostics.disk_version
+    monkeypatch.setattr(diagnostics, "disk_version",                         # ...and old file on disk
+                        lambda n: (1, 5000) if n == "ocr_pipeline" else real(n))
     at = new_app()
     assert not at.exception and any("out of date" in e.value for e in at.error)
-    assert any("ocr_pipeline.py" in m.value for m in at.markdown)
+    text = " ".join(m.value for m in at.markdown)
+    assert "ocr_pipeline.py" in text and "OLD one" in text
     assert not any(b.key == "s_sample" for b in at.button)                  # the app stopped safely
+
+
+def test_app_heals_itself_when_only_the_memory_copy_is_old(monkeypatch):
+    import ocr_pipeline
+    monkeypatch.setattr(ocr_pipeline, "MODULE_VERSION", 1)                  # disk is right, memory is stale
+    at = new_app()
+    assert not at.exception and not at.error
+    assert any(b.key == "s_sample" for b in at.button)                      # it reloaded and carried on
+    import ocr_pipeline as o
+    assert o.MODULE_VERSION == 7
 
 
 def test_system_check_reports_real_results():
@@ -110,3 +124,28 @@ def test_system_check_reports_real_results():
     assert not at.exception
     text = " ".join(m.value for m in at.markdown)
     assert "App files up to date" in text and "Kannada reading model" in text and "✅" in text
+
+
+def test_a_photo_with_no_text_says_so_instead_of_showing_an_empty_page(monkeypatch):
+    import ocr_pipeline
+    from PIL import Image
+    blank = ocr_pipeline.PageResult(text="", avg_conf=0.0, engine="tesseract", words=[])
+    blank.preprocessed = Image.new("RGB", (50, 50), "white")
+    monkeypatch.setattr(ocr_pipeline, "read_document",
+                        lambda *a, **k: ([Image.new("RGB", (50, 50), "white")], [blank], False))
+    at = new_app(); read_sample(at)
+    assert not at.exception and not in_workspace(at)
+    assert any("No text was found" in e.value for e in at.error)
+    assert not any(b.label == "Try reading again" for b in at.button)       # retaking the photo is the fix
+
+
+def test_ai_read_pages_are_not_labelled_100_percent_clean(monkeypatch):
+    import ocr_pipeline
+    from PIL import Image
+    r = ocr_pipeline.PageResult(text="ಕರ್ನಾಟಕ ಸರ್ಕಾರದ ಸೂಚನೆ", avg_conf=100.0, engine="vision", words=[])
+    r.preprocessed, r.variant = Image.new("RGB", (50, 50), "white"), "vision"
+    monkeypatch.setattr(ocr_pipeline, "read_document",
+                        lambda *a, **k: ([Image.new("RGB", (50, 50), "white")], [r], False))
+    at = new_app(); read_sample(at)
+    html = " ".join(m.value for m in at.markdown)
+    assert in_workspace(at) and "AI read" in html and "Clean read" not in html

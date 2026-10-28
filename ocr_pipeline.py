@@ -4,7 +4,7 @@ Flow:  load image/PDF  ->  preprocess (OpenCV)  ->  Tesseract (kan)
        -> if confidence is low and an API key exists -> vision model fallback
        -> clean up text + mark uncertain words
 """
-MODULE_VERSION = 6   # bumped on every release; app.py checks it to spot half-uploaded updates
+MODULE_VERSION = 7   # bumped on every release; app.py checks it to spot half-uploaded updates
 
 import base64
 import hashlib
@@ -328,7 +328,10 @@ def run_vision(img: Image.Image) -> PageResult:
         "Transcribe ALL the text in this image exactly as written, "
         "keeping the original language (mostly Kannada) and line breaks. "
         "Do not translate, summarize or add comments. "
-        "Output only the transcription.", 4000, image=img)
+        "Output only the transcription. "
+        "If the image contains no readable text, reply with exactly: NO_TEXT", 4000, image=img)
+    if text.strip().upper().startswith("NO_TEXT"):
+        text = ""
     return PageResult(clean_text(text), 100.0, "vision", [])
 
 

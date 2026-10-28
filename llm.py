@@ -9,7 +9,7 @@ the app still works (OCR, search, export, free translation, read-aloud).
 Google retires Gemini model names often, so we never rely on one name: we ask the API
 which models this key can use, try the best ones in order, and remember what worked.
 """
-MODULE_VERSION = 6   # bumped on every release; app.py checks it to spot half-uploaded updates
+MODULE_VERSION = 7   # bumped on every release; app.py checks it to spot half-uploaded updates
 
 import base64
 import io

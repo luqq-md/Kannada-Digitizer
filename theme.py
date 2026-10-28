@@ -12,7 +12,7 @@ Palette (all taken from the subject):
   turmeric   #E8A317  accent        (flag yellow)
   kumkuma    #A31F1A  actions       (flag red)
 """
-MODULE_VERSION = 6   # bumped on every release; app.py checks it to spot half-uploaded updates
+MODULE_VERSION = 7   # bumped on every release; app.py checks it to spot half-uploaded updates
 
 import html
 
@@ -221,6 +221,11 @@ hr{border-color:var(--soap2);}
 [data-testid="stSidebar"] [data-testid="stCaptionContainer"],[data-testid="stSidebar"] [data-testid="stCaptionContainer"] *,
 [data-testid="stSidebar"] [data-testid="stRadioOption"] small{color:#9FB0A6!important;font-size:.8rem!important;}
 .st-key-mobilenav{display:none;}
+@media (max-width:700px){
+  .st-key-topbar [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:.5rem!important;}
+  .st-key-topbar [data-testid="stColumn"]{min-width:0!important;flex:1 1 28%!important;width:auto!important;}
+  .st-key-topbar [data-testid="stColumn"]:nth-child(1),.st-key-topbar [data-testid="stColumn"]:nth-child(2){flex:1 1 100%!important;}
+}
 @media (max-width:991px){.st-key-mobilenav{display:block;margin:.9rem 0 1.2rem;}}
 /* the Upload / Take a photo choice: large and obvious */
 .st-key-source [data-testid="stButtonGroup"] button,.st-key-source button{min-height:3.1rem!important;font-size:1.05rem!important;
@@ -297,7 +302,10 @@ hr{border-color:var(--soap2);}
 .stApp [data-testid="stImage"] img{transition:transform .18s,box-shadow .18s;}
 .stApp [data-testid="stImage"]:hover img{transform:translateY(-3px);box-shadow:0 1px 0 rgba(0,0,0,.18),0 24px 30px -18px rgba(19,32,27,.6);}
 .stApp .stButton > button,.stApp .stDownloadButton > button{min-height:2.7rem;}
-.stApp [data-testid="stToast"]{border-left:4px solid var(--turmeric);}
+.stApp [data-testid="stToast"],[data-testid="stToast"]{border-left:4px solid var(--turmeric);}
+/* pop-up messages sit at the bottom centre so they never cover the Save / Download / New page buttons */
+[data-testid="stToastContainer"]{top:auto!important;bottom:1.4rem!important;right:auto!important;left:50%!important;
+  transform:translateX(-50%);align-items:center;}
 .stApp .chip.vision{background:var(--ink);color:#fff;}
 .stApp .chip.vision *{color:#fff;}
 
@@ -460,17 +468,20 @@ def result_bar(avg: float, pages: int, engines: str, variant: str) -> None:
         verdict, color = "Good read", "#E8A317"
     else:
         verdict, color = "Rough read", "#A31F1A"
+    vision_read = engines.lower().startswith("vision") or variant == "vision"
+    if vision_read:                       # the AI reader gives no word-by-word confidence: do not claim 100%
+        verdict, color, pct = "AI read", "#E8A317", 85
     c = 2 * 3.14159 * 44
     ring = (f'<div class="ring"><svg width="62" height="62" viewBox="0 0 104 104">'
             f'<circle cx="52" cy="52" r="44" fill="none" stroke="#D8DED4" stroke-width="10"/>'
             f'<circle cx="52" cy="52" r="44" fill="none" stroke="{color}" stroke-width="10" '
             f'stroke-linecap="round" stroke-dasharray="{c * pct / 100:.1f} {c:.1f}"/></svg>'
-            f'<div class="ring-num">{pct}%</div></div>')
-    vision = engines.lower().startswith("vision") or variant == "vision"
+            f'<div class="ring-num">{"AI" if vision_read else str(pct) + "%"}</div></div>')
+    vision = vision_read
     chips = (f'<span class="chip">{pages} page{"s" if pages != 1 else ""}</span>'
              f'<span class="chip {"vision" if vision else ""}">{"AI vision" if vision else "Tesseract"}</span>')
     hint = {"Clean read": "Looks solid", "Good read": "Check the yellow words",
-            "Rough read": "Please review every line"}[verdict]
+            "Rough read": "Please review every line", "AI read": "Check names and numbers"}[verdict]
     st.markdown(f'<div class="bar-compact">{ring}<div><p class="verdict">{verdict}</p>'
                 f'<div class="chips"><span class="chip">{hint}</span>{chips}</div></div></div>',
                 unsafe_allow_html=True)

@@ -5,19 +5,33 @@ spots a half-uploaded update (new app.py with an old helper file).
 """
 import importlib
 import os
+import re
+import sys
 import shutil
 import subprocess
 import time
 import traceback
 from pathlib import Path
 
-MODULE_VERSION = 6
+MODULE_VERSION = 7
 
 HERE = Path(__file__).parent
 
 
+def disk_version(name: str):
+    """(version written in the file ON DISK, size in bytes), or (None, None) if the file is not there.
+    Reading the file itself tells apart 'not uploaded' from 'uploaded but the app has not restarted'."""
+    path = HERE / f"{name}.py"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None, None
+    m = re.search(r"^MODULE_VERSION\s*=\s*(\d+)", text, re.M)
+    return (int(m.group(1)) if m else 0), path.stat().st_size
+
+
 def stale_modules(required: dict) -> list:
-    """[(file, found_version, needed_version), ...] for every helper file that is out of date or missing."""
+    """[(file, version loaded in memory, needed), ...] for every helper file that is out of date or missing."""
     out = []
     for name, need in required.items():
         try:
@@ -31,12 +45,63 @@ def stale_modules(required: dict) -> list:
     return out
 
 
-def describe_stale(stale: list) -> str:
-    lines = []
-    for f, found, need in stale:
-        lines.append(f"- {f}: " + ("missing" if found is None else
-                                   f"the server has version {found}, this app needs version {need}"))
-    return "\n".join(lines)
+def try_reload(required: dict) -> list:
+    """Self-heal: a helper file whose copy on disk is right but whose copy in memory is old (the app
+    was updated without a restart) is reloaded in place. Returns the names that were reloaded."""
+    done = []
+    for name, need in required.items():
+        disk, _ = disk_version(name)
+        mod = sys.modules.get(name)
+        if mod is not None and disk == need and getattr(mod, "MODULE_VERSION", 0) != need:
+            try:
+                importlib.reload(mod)
+                done.append(name)
+            except Exception:
+                pass
+    return done
+
+
+def explain(stale: list, required: dict) -> str:
+    """Plain-language report for the screen that appears when files are out of date."""
+    lines, on_disk_old = [], False
+    for f, mem, need in stale:
+        name = f[:-3]
+        disk, size = disk_version(name)
+        if disk is None:
+            lines.append(f"- **{f}**: not found on the server at all")
+            on_disk_old = True
+        elif disk != need:
+            lines.append(f"- **{f}**: the file on the server is the OLD one (version {disk}, "
+                         f"{size // 1024} KB); this app needs version {need}")
+            on_disk_old = True
+        else:
+            lines.append(f"- **{f}**: the new file is on the server, but the app is still running the "
+                         f"old copy (version {mem}). Rebooting the app fixes this")
+    try:
+        entries = sorted(os.listdir(HERE))
+    except OSError:
+        entries = []
+    shown = [e for e in entries if not e.startswith((".", "__"))]
+    folders = [e for e in shown if (HERE / e).is_dir()]
+    zips = [e for e in shown if e.lower().endswith(".zip")]
+    hints = []
+    if zips:
+        hints.append(f"**A .zip file is in your repository ({', '.join(zips)}).** A zip must be "
+                     "extracted first; GitHub cannot use the files inside it. Delete it and upload the "
+                     "extracted files.")
+    odd = [f for f in folders if f not in ("tessdata", "samples", "tests", ".streamlit")]
+    if odd:
+        hints.append(f"**There is an extra folder ({', '.join(odd)}).** Files placed inside a folder are not "
+                     "used. The helper files must sit next to app.py, not in a subfolder.")
+    fix = ("Upload the newest copy of each file listed above next to app.py (**Add file → Upload files**), "
+           "choose **Commit changes**, then open Streamlit's **Manage app → ⋮ → Reboot app**."
+           if on_disk_old else
+           "Open Streamlit's **Manage app → ⋮ → Reboot app**, wait a minute, and refresh this page.")
+    body = "\n".join(lines) + "\n\n**How to fix it:** " + fix
+    if hints:
+        body += "\n\n" + "\n\n".join(hints)
+    body += f"\n\n*Files next to app.py on the server: {', '.join(shown) or 'none found'}*"
+    return body
 
 
 def _tesseract_version() -> str:

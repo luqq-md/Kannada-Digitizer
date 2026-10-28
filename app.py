@@ -13,25 +13,29 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="Kannada Digitizer · ಕನ್ನಡ ಡಿಜಿಟೈಸರ್", page_icon="📜", layout="wide")
 
 # ---- start-up guard: a half-uploaded update (new app.py + old helper file) is named, not mysterious
-APP_VERSION = 6
+APP_VERSION = 7
 REQUIRED = {"ocr_pipeline": APP_VERSION, "ai_tools": APP_VERSION, "llm": APP_VERSION,
             "storage": APP_VERSION, "exports": APP_VERSION, "theme": APP_VERSION}
 try:
     import diagnostics
-    _stale = (diagnostics.stale_modules(REQUIRED)
-              if getattr(diagnostics, "MODULE_VERSION", 0) == APP_VERSION
-              else [("diagnostics.py", getattr(diagnostics, "MODULE_VERSION", 0), APP_VERSION)])
+    _diag_ok = getattr(diagnostics, "MODULE_VERSION", 0) == APP_VERSION
 except ImportError:
-    diagnostics = None
-    _stale = [("diagnostics.py", None, APP_VERSION)]
-if _stale:
-    lines = "\n".join(f"- **{f}**: " + ("not on the server" if found is None else
-                      f"the server has version {found}, this app needs {need}")
-                      for f, found, need in _stale)
+    diagnostics, _diag_ok = None, False
+
+if not _diag_ok:
     st.error("Some files on the server are out of date, so the app cannot start safely.")
-    st.markdown(f"{lines}\n\n**How to fix it:** open your GitHub repository, choose **Add file → "
-                "Upload files**, upload the newest copy of each file listed above, and commit. "
-                "Then in Streamlit open **Manage app → ⋮ → Reboot app**.")
+    st.markdown("**diagnostics.py** is missing or old. Upload the newest copy of **all** the files from "
+                "the latest zip (after extracting it) next to app.py, commit, then open Streamlit's "
+                "**Manage app → ⋮ → Reboot app**.")
+    st.stop()
+
+_stale = diagnostics.stale_modules(REQUIRED)
+if _stale:
+    diagnostics.try_reload(REQUIRED)              # self-heal when only the in-memory copy is old
+    _stale = diagnostics.stale_modules(REQUIRED)
+if _stale:
+    st.error("Some files on the server are out of date, so the app cannot start safely.")
+    st.markdown(diagnostics.explain(_stale, REQUIRED))
     st.stop()
 
 import ai_tools   # noqa: E402
@@ -256,8 +260,12 @@ def start_page():
             ss.read_error = ("This page could not be read. Try a clearer, well-lit photo with the "
                              "page filling the frame, or try again.",
                              f"{type(e).__name__}: {str(e)[:400]}", True)
+        text = "\n\n".join(r.text for r in results) if results else ""
+        letters = sum(ch.isalpha() or "\u0c80" <= ch <= "\u0cff" for ch in text)
+        if not ss.get("read_error") and letters < 4:         # nothing readable: say so, do not show an empty page
+            ss.read_error = ("No text was found in this photo. Hold the page flat, fill the frame with it, "
+                             "use good light, and take the photo again.", None, False)
         if not ss.get("read_error"):
-            text = "\n\n".join(r.text for r in results)
             st.write("Translating so it reads in English")
             und = safe_understand(text)
             status.update(label="Ready", state="complete", expanded=False)
@@ -299,7 +307,8 @@ def workspace_page():
         st.toast(flash, icon="✅")
 
     # ---- one compact bar: status, name, save, download, new page
-    b1, b2, b3, b4, b5 = st.columns([4.4, 2.6, 1.1, 1.5, 1.3], vertical_alignment="center")
+    with st.container(key="topbar"):
+        b1, b2, b3, b4, b5 = st.columns([4.4, 2.6, 1.1, 1.5, 1.3], vertical_alignment="center")
     with b1:
         theme.result_bar(avg, len(images), engines, results[0].variant)
     ss.title = b2.text_input("Document name", ss.title, label_visibility="collapsed",
