@@ -1,92 +1,189 @@
-# 📜 Kannada Digitizer
-Turn Kannada text in photos, scans, PDFs and handwriting into **editable, searchable digital text**,
-then translate it, summarize it, listen to it, and ask questions about it.
+# Kannada Digitizer
 
-Built for the Kannada Digital Innovation Hackathon 2026 (Problem 5: Kannada Text Digitization).
+A simple web application for converting Kannada documents into digital text.
+
+Kannada Digitizer helps users extract Kannada text from photos, scanned documents, and PDFs without having to type everything manually. Once the text is extracted, users can edit it, read an English translation, save documents for later, and download the results in different formats.
+
+**Live Demo:** https://kannada-digitizer.streamlit.app/
+
+## Why I built this
+
+A lot of Kannada content exists in printed notices, old documents, books, and scanned pages. Working with this content digitally can be difficult when the text is only available as an image or scan.
+
+I built Kannada Digitizer to make that process easier. The idea is to take a document, extract its text, and make the content easier to read, edit, search, and reuse.
+
+This project was built for the Kannada Digital Innovation Hackathon 2026 under the *Kannada Text Digitization* problem statement.
 
 ## Features
-- **Scan and go:** take a photo (the phone's back camera) or upload a page and it is read the moment it arrives, with no button to press. One tap on a sample page too
-- Upload images, scanned PDFs or camera photos (phone rotation is fixed automatically)
-- OpenCV clean-up: upscale, denoise, straighten, flip white-on-dark text, remove glare
-- Kannada OCR with Tesseract; several clean-ups are tried **in parallel** and the best is kept
-- Hard photos: the app finds where the text is, crops away the rest and reads it again
-- **English right beside the Kannada**, translated automatically: *English*, *Side by side*
-  (each Kannada line with its meaning) and *Kannada* (editable) views
-- AI helper (free Gemini or Claude): fixes reading mistakes, translates by meaning, summary,
-  key facts, ask questions, handwriting fallback. Works without a key in a basic mode
-- Library with Kannada and English full-text search
-- Export: Word (English + Kannada + line-by-line table), TXT, searchable PDF; listen in Kannada or English
 
-## Quick start
-1. Install **Python 3.10+**, **Tesseract OCR**, and **Poppler** (for PDFs).
-   - Windows: Tesseract (UB Mannheim installer) + Poppler (add its `bin` folder to PATH).
-     If Tesseract isn't found, set its path in `ocr_pipeline.py` (line marked "On Windows").
-   - Mac: `brew install tesseract poppler`
-   - Linux: `sudo apt install tesseract-ocr poppler-utils`
-2. In this folder:
-   ```
-   pip install -r requirements.txt
-   streamlit run app.py
-   ```
-3. Open the link it prints (http://localhost:8501).
+- **Image and PDF input:** Upload images, scanned PDFs, or take a photo directly from your device.
+- **Kannada text recognition:** Extract printed Kannada text using Tesseract OCR.
+- **Image preprocessing:** Uses OpenCV to improve readability by adjusting images, reducing noise, straightening pages, and handling certain lighting issues.
+- **Automatic reading:** The application starts processing a document as soon as it is uploaded.
+- **English translation:** Read the extracted content in English, Kannada, or a side-by-side view.
+- **Editable text:** Review and correct the extracted Kannada text before saving or exporting it.
+- **AI-assisted reading:** Optional AI support for difficult pages, handwriting, text correction, summaries, key facts, and questions about a document.
+- **Document library:** Save documents and search their Kannada and English text later.
+- **Export options:** Download Kannada text, English text, Word documents, and searchable PDFs.
+- **Text-to-speech:** Listen to the content in Kannada or English.
+- **Sample document:** Try the application with a sample page if you do not have a document ready.
 
-The Kannada model is already included in `tessdata/`, so no extra language install is needed.
+## How it works
 
-### Optional: enable AI features (handwriting, summary, Q&A)
-Set an Anthropic API key before running:
-- Windows (PowerShell): `$env:ANTHROPIC_API_KEY="your-key"`
-- Mac/Linux: `export ANTHROPIC_API_KEY="your-key"`
+1. Upload a photograph, image, or scanned PDF, or take a picture of a document.
+2. The application preprocesses the image when enabled.
+3. Tesseract OCR extracts the Kannada text. Optional AI-assisted recognition can help with difficult pages.
+4. Review the extracted text and switch between Kannada, English, and side-by-side views.
+5. Edit the text, save it to the library, search saved documents, or export it.
 
-Without a key everything else still works (OCR, search, export, translation, read-aloud).
+## Tech stack
 
-## Test it
-```
-python make_samples.py     # creates synthetic Kannada test images in samples/
-python evaluate.py         # prints Character Error Rate table -> accuracy_report.md
-```
-Replace/add your own real scans in `samples/` with a matching `.txt` holding the correct text.
-
-## Project layout
-| File | Purpose |
+| Technology | Purpose |
 |---|---|
-| `app.py` | Streamlit web app (UI) |
-| `ocr_pipeline.py` | Preprocessing + Tesseract + vision fallback |
-| `storage.py` | SQLite + full-text search |
-| `exports.py` | TXT / DOCX / searchable PDF |
-| `ai_tools.py` | Translate / summarize / Q&A / text-to-speech |
-| `evaluate.py` | Accuracy (CER) measurement |
-| `Dockerfile` | Deployment |
+| Python | Application logic |
+| Streamlit | Web interface |
+| Tesseract OCR | Kannada text recognition |
+| OpenCV | Image preprocessing |
+| Pillow | Image handling |
+| pdf2image and Poppler | PDF page conversion |
+| SQLite | Local document storage and text search |
+| python-docx | Word document generation |
+| gTTS | Text-to-speech |
+| deep-translator | Basic translation |
+| Google Gemini / Anthropic Claude | Optional AI-assisted features |
 
-## Known limitations (be honest in the submission)
-- Tesseract is strong on clean printed Kannada, weaker on handwriting and very old scripts; handwriting relies on the vision model.
-- Copy-paste from the searchable PDF's hidden text layer may not preserve Kannada conjunct order; the TXT/DOCX exports are the reliable text.
-- Translation and read-aloud need an internet connection.
+## Run locally
 
-## Deploying free (Streamlit Community Cloud)
-1. Put this folder in a **public GitHub repository** (never include your API key).
-2. Go to share.streamlit.io, sign in with GitHub, click **Create app**, pick the repo,
-   branch `main`, main file `app.py`.
-3. Open **Advanced settings**: choose Python 3.12 and paste your key in **Secrets**:
-   ```
-   GEMINI_API_KEY = "your-key-here"
-   ```
-4. Deploy. `requirements.txt` installs the Python libraries and `packages.txt`
-   installs Tesseract and Poppler.
+### Prerequisites
 
-Notes: free apps sleep when idle (open the link before a demo), saved library documents are
-not permanent on free hosting, and Tesseract on the cloud may be an older version than on your PC.
+- Python 3.10 or later
+- Git
+- Tesseract OCR
+- Poppler for PDF processing
 
-## Tests
+Install the required system dependencies first.
+
+**Windows:** Install Tesseract using the [UB Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki) and install Poppler. Add their executable directories to your system `PATH` if necessary.
+
+**Linux:**
+
+```bash
+sudo apt update
+sudo apt install tesseract-ocr poppler-utils
 ```
+
+**macOS:**
+
+```bash
+brew install tesseract poppler
+```
+
+### Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/luqq-md/Kannada-Digitizer.git
+cd Kannada-Digitizer
+```
+
+Create and activate a virtual environment:
+
+```bash
+python -m venv .venv
+```
+
+On Windows:
+
+```powershell
+.venv\Scripts\activate
+```
+
+On Linux or macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+Install the Python dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Start the application:
+
+```bash
+streamlit run app.py
+```
+
+Open the local URL shown in your terminal, usually `http://localhost:8501`.
+
+## Optional AI features
+
+The basic OCR workflow, document search, exports, and basic translation can work without an AI API key. AI-assisted features require a supported provider and a valid API key.
+
+For Google Gemini, set:
+
+```powershell
+$env:GEMINI_API_KEY="your-api-key"
+```
+
+For Anthropic Claude, set:
+
+```powershell
+$env:ANTHROPIC_API_KEY="your-api-key"
+```
+
+These commands are for the current PowerShell session. For Streamlit Community Cloud, configure the appropriate key in the application's **Secrets** settings instead.
+
+Never commit API keys or other credentials to the repository.
+
+## Testing
+
+The project includes automated tests and tools for checking OCR output.
+
+Run the tests with:
+
+```bash
 pip install pytest
 pytest
 ```
-19 automated checks cover search and the database upgrade, AI reply parsing and every fallback,
-model fallback and key masking, safe file loading, reading the sample pages, and the Word export.
-They need no internet and no API key.
 
-## If something does not work on the live site
-Open **About, then System check**. It tests the server (Tesseract, the Kannada model, PDF support,
-the database, the AI helper, and a real sample read) and shows the real reason for any failure.
-If you upload a new version and forget one file, the app starts with a message naming the file that
-is out of date, instead of failing in a confusing way. Server logs: Streamlit **Manage app, Logs**.
+To generate sample Kannada images and evaluate text recognition:
+
+```bash
+python make_samples.py
+python evaluate.py
+```
+
+The evaluation script reports Character Error Rate (CER), which helps measure how much the extracted text differs from the expected text. Lower CER indicates better recognition.
+
+For a meaningful evaluation, use real Kannada documents with verified reference text in addition to generated samples.
+
+## Limitations
+
+- OCR results depend on image quality, lighting, font style, and document condition.
+- Clean printed Kannada generally works better than handwriting or heavily damaged documents.
+- AI-assisted handwriting recognition and text correction can make mistakes, so important content should be reviewed manually.
+- Translation may not preserve every nuance of the original Kannada text.
+- Translation and text-to-speech require an internet connection.
+- The searchable PDF export may not preserve the order of all complex Kannada characters when its text layer is copied. The TXT and DOCX exports are preferable when you need to reuse the extracted text.
+
+## Future improvements
+
+Some areas I would like to improve are:
+
+- Better recognition of handwritten and older Kannada documents.
+- Improved OCR accuracy on low-quality scans and photographs.
+- More thorough testing with real-world Kannada documents.
+- Better handling of multi-page documents and complex layouts.
+- More options for organizing and exporting digitized documents.
+
+## License
+
+No license has been specified yet. If you intend to make the project open source, add a suitable `LICENSE` file and update this section.
+
+---
+
+**Kannada Digitizer** — built to make Kannada documents easier to work with digitally.
